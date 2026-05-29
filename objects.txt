@@ -1,0 +1,439 @@
+Total boxes: 431
+obj-418 | comment | FrqTester_LR_MOD_Laser: stereo patch, headphoes out put or interface outs 1 + 2
+obj-424 | comment | Mute
+obj-423 | comment | Solo
+obj-422 | comment | Select fader face%
+obj-421 | comment | * Pitch buttons inc(rease / dec(rease)
+  Hold for continous change
+obj-419 | comment | Select fader steps: Units, decimal or cents
+obj-467 | newobj | scale 0. 1. -20 0
+obj-451 | flonum | 
+obj-465 | flonum | 
+obj-450 | newobj | scale 0. 1. -20 0
+obj-27 | newobj | +~
+obj-63 | flonum | 
+obj-73 | newobj | +~ 0.1
+obj-82 | newobj | +~ 0.1
+obj-189 | meter~ | 
+obj-414 | flonum | 
+obj-415 | newobj | vst~ C74_VST3:/MAnalyzer
+obj-416 | newobj | vst~ "C74_VST3:/Youlean Loudness Meter 2"
+obj-417 | meter~ | 
+obj-413 | newobj | s PW8
+obj-412 | comment | Rect PW
+obj-98 | flonum | 
+obj-89 | slider | 
+obj-102 | ezdac~ | 
+obj-411 | panel | 
+obj-66 | comment | phase reset (all)
+obj-30 | button | 
+obj-410 | panel | 
+obj-301 | comment | Oscilators 5-8 Right channel or X axis
+obj-300 | comment | Oscilators 1- 4 Left channel or Y axis
+obj-281 | comment | set size of the display buffer (8-256, default 128)
+obj-283 | comment | set the number of samples collected for each value in the display buffer (2-8092, default 128)
+obj-139 | comment | Sample Scope
+obj-104 | comment | Buffer Scope: capture rate to see frecuencies sum or cancelation 
+obj-96 | number | 
+obj-77 | newobj | scale 1 127 40. 50.
+obj-74 | newobj | scale 1 127 40. 50.
+obj-95 | message | -0.5 0.5
+obj-91 | message | -1 1
+obj-92 | message | -0.2 0.2
+obj-93 | attrui | 
+obj-85 | newobj | r~ mixR
+obj-88 | newobj | r~ mixL
+obj-76 | scope~ | 
+obj-16 | message | 0
+obj-26 | newobj | send setphase0
+obj-405 | newobj | s phase8
+obj-406 | flonum | 
+obj-407 | comment | Phase 0-1
+obj-401 | newobj | s phase7
+obj-403 | flonum | 
+obj-404 | comment | Phase 0-1
+obj-348 | newobj | s phase6
+obj-349 | flonum | 
+obj-350 | comment | Phase 0-1
+obj-345 | newobj | s phase5
+obj-346 | flonum | 
+obj-347 | comment | Phase 0-1
+obj-315 | newobj | s phase4
+obj-316 | flonum | 
+obj-318 | comment | Phase 0-1
+obj-309 | newobj | s phase3
+obj-313 | flonum | 
+obj-314 | comment | Phase 0-1
+obj-305 | newobj | s phase2
+obj-306 | flonum | 
+obj-307 | comment | Phase 0-1
+obj-72 | newobj | s phase1
+obj-59 | flonum | 
+obj-28 | comment | Phase 0-1
+obj-81 | newobj | - 76.2
+obj-83 | newobj | - 38.1
+obj-80 | scope~ | 
+obj-79 | newobj | scale 1 127 103. 109.
+obj-78 | newobj | scale 1 127 20 60
+obj-84 | newobj | scale 1 127 20. 90.
+obj-75 | newobj | scale 1 127 40. 50.
+obj-2 | newobj | scale 1 127 40. 50.
+obj-25 | newobj | + 127
+obj-24 | newobj | + 127
+obj-23 | newobj | + 127
+obj-317 | newobj | r mixout2
+obj-402 | message | 1000
+obj-399 | number | 
+obj-400 | newobj | * 0.
+obj-303 | kslider | 
+obj-302 | newobj | ftom
+obj-183 | newobj | udpsend 127.0.0.1 7400
+obj-398 | newobj | sel 127
+obj-397 | newobj | sel 127
+obj-396 | newobj | sel 127
+obj-395 | newobj | sel 127
+obj-394 | newobj | sel 127
+obj-393 | newobj | sel 127
+obj-392 | newobj | sel 127
+obj-391 | newobj | sel 127
+obj-390 | newobj | sel 127
+obj-389 | newobj | sel 127
+obj-388 | newobj | sel 127
+obj-387 | newobj | sel 127
+obj-386 | newobj | sel 127
+obj-385 | newobj | sel 127
+obj-384 | newobj | sel 127
+obj-383 | newobj | sel 127
+obj-375 | comment | dec
+obj-376 | comment | inc
+obj-377 | newobj | s p8dec
+obj-378 | newobj | ctlin 71 1
+obj-379 | newobj | s p8inc
+obj-380 | newobj | ctlin 55 1
+obj-381 | button | 
+obj-382 | button | 
+obj-367 | comment | dec
+obj-368 | comment | inc
+obj-369 | newobj | s p7dec
+obj-370 | newobj | ctlin 70 1
+obj-371 | newobj | s p7inc
+obj-372 | newobj | ctlin 54 1
+obj-373 | button | 
+obj-374 | button | 
+obj-359 | comment | dec
+obj-360 | comment | inc
+obj-361 | newobj | s p6dec
+obj-362 | newobj | ctlin 69 1
+obj-363 | newobj | s p6inc
+obj-364 | newobj | ctlin 53 1
+obj-365 | button | 
+obj-366 | button | 
+obj-351 | comment | dec
+obj-352 | comment | inc
+obj-353 | newobj | s p5dec
+obj-354 | newobj | ctlin 68 1
+obj-355 | newobj | s p5inc
+obj-356 | newobj | ctlin 52 1
+obj-357 | button | 
+obj-358 | button | 
+obj-337 | comment | dec
+obj-338 | comment | inc
+obj-339 | newobj | s p4dec
+obj-340 | newobj | ctlin 67 1
+obj-341 | newobj | s p4inc
+obj-342 | newobj | ctlin 51 1
+obj-343 | button | 
+obj-344 | button | 
+obj-329 | comment | dec
+obj-330 | comment | inc
+obj-331 | newobj | s p3dec
+obj-332 | newobj | ctlin 66 1
+obj-333 | newobj | s p3inc
+obj-334 | newobj | ctlin 50 1
+obj-335 | button | 
+obj-336 | button | 
+obj-321 | comment | dec
+obj-322 | comment | inc
+obj-323 | newobj | s p2dec
+obj-324 | newobj | ctlin 65 1
+obj-325 | newobj | s p2inc
+obj-326 | newobj | ctlin 49 1
+obj-327 | button | 
+obj-328 | button | 
+obj-320 | comment | dec
+obj-319 | comment | inc
+obj-312 | newobj | s p1dec
+obj-311 | newobj | ctlin 64 1
+obj-310 | newobj | s p1inc
+obj-308 | newobj | ctlin 48 1
+obj-299 | button | 
+obj-297 | button | 
+obj-201 | newobj | s preset1
+obj-304 | message | 1
+obj-298 | newobj | s pitch1
+obj-250 | newobj | + 889
+obj-268 | newobj | + 762
+obj-269 | newobj | + 635
+obj-270 | newobj | + 508
+obj-271 | newobj | + 381
+obj-279 | newobj | + 254
+obj-280 | newobj | + 127
+obj-200 | newobj | ctlin 7 1
+obj-202 | newobj | ctlin 6 1
+obj-210 | newobj | ctlin 5 1
+obj-214 | newobj | ctlin 4 1
+obj-216 | newobj | ctlin 3 1
+obj-230 | newobj | ctlin 2 1
+obj-231 | newobj | ctlin 0 1
+obj-249 | newobj | ctlin 1 1
+obj-441 | newobj | ctlinunit
+obj-266 | newobj | s unitsel
+obj-258 | newobj | loadbang
+obj-251 | newobj | unitselect
+obj-209 | comment | C
+obj-208 | comment | D
+obj-206 | comment | U
+obj-205 | toggle | 
+obj-204 | toggle | 
+obj-203 | toggle | 
+obj-176 | comment | Pitch
+obj-175 | comment | Pitch
+obj-174 | comment | Pitch
+obj-173 | comment | Pitch
+obj-172 | comment | Pitch
+obj-164 | comment | Pitch
+obj-3 | comment | Pitch
+obj-218 | flonum | 
+obj-219 | comment | dB
+obj-217 | flonum | 
+obj-215 | comment | dB
+obj-213 | levelmeter~ | 
+obj-212 | levelmeter~ | 
+obj-211 | comment | Amplitude set in linear (0. to 1.)
+
+0 = -inf dB 
+0.5 = -0.62dB
+1 = 0dB
+
+Objetos meter al final del flujo indican el valor de la mezcla en decibeles
+obj-170 | message | 0 200
+obj-171 | newobj | line 0. 20
+obj-158 | message | 0 200
+obj-161 | newobj | line 0. 20
+obj-153 | message | 0 200
+obj-155 | newobj | line 0. 20
+obj-129 | message | 0 200
+obj-144 | newobj | line 0. 20
+obj-127 | message | 0 200
+obj-128 | newobj | line 0. 20
+obj-125 | message | 0 200
+obj-126 | newobj | line 0. 20
+obj-124 | newobj | line 0. 20
+obj-121 | message | 0 200
+obj-123 | newobj | r zero1
+obj-99 | message | 0 200
+obj-90 | newobj | line 0. 20
+obj-19 | newobj | r zero8
+obj-11 | newobj | r zero7
+obj-10 | newobj | r zero6
+obj-9 | newobj | r zero5
+obj-7 | newobj | r zero4
+obj-6 | newobj | r zero3
+obj-5 | newobj | r zero2
+obj-138 | newobj | r 2amp
+obj-145 | message | 0
+obj-141 | newobj | loadbang
+obj-130 | newobj | r 8mutem
+obj-131 | newobj | r 7mutem
+obj-132 | newobj | r 6mutem
+obj-133 | newobj | r 5mutem
+obj-134 | newobj | r 4mutem
+obj-135 | newobj | r 3mutem
+obj-136 | newobj | r 2mutem
+obj-137 | newobj | r 1mutem
+obj-105 | newobj | r 8solom
+obj-109 | newobj | r 7solom
+obj-110 | newobj | r 6solom
+obj-113 | newobj | r 5solom
+obj-116 | newobj | r 4solom
+obj-117 | newobj | r 3solom
+obj-118 | newobj | r 2solom
+obj-120 | newobj | r 1solom
+obj-254 | newobj | r 8lvl
+obj-255 | meter~ | 
+obj-256 | newobj | r 8mute
+obj-259 | newobj | r 8amp
+obj-260 | newobj | r gpitch8
+obj-261 | newobj | s solo8
+obj-262 | newobj | s mute8
+obj-263 | newobj | == 0
+obj-264 | toggle | 
+obj-265 | toggle | 
+obj-267 | slider | 
+obj-278 | newobj | r vol8
+obj-282 | newobj | togglecolor
+obj-284 | newobj | s vol8
+obj-285 | newobj | volcolor
+obj-286 | flonum | 
+obj-287 | newobj | s pitch8
+obj-294 | flonum | 
+obj-295 | message | 8
+obj-296 | toggle | 
+obj-140 | newobj | r 7lvl
+obj-142 | meter~ | 
+obj-143 | newobj | r 7mute
+obj-146 | newobj | r 7amp
+obj-147 | newobj | r gpitch7
+obj-148 | newobj | s solo7
+obj-149 | newobj | s mute7
+obj-150 | newobj | == 0
+obj-151 | toggle | 
+obj-152 | toggle | 
+obj-154 | slider | 
+obj-156 | newobj | r vol7
+obj-157 | newobj | togglecolor
+obj-159 | newobj | s vol7
+obj-163 | newobj | volcolor
+obj-165 | flonum | 
+obj-166 | newobj | s pitch7
+obj-167 | flonum | 
+obj-168 | message | 7
+obj-169 | toggle | 
+obj-87 | newobj | r slidepitch8
+obj-86 | newobj | r slidepitch7
+obj-68 | newobj | r 6lvl
+obj-67 | newobj | r 5lvl
+obj-64 | meter~ | 
+obj-62 | meter~ | 
+obj-58 | meter~ | 
+obj-60 | newobj | r 4lvl
+obj-54 | meter~ | 
+obj-55 | newobj | r 3lvl
+obj-52 | meter~ | 
+obj-53 | newobj | r 2lvl
+obj-51 | meter~ | 
+obj-50 | newobj | r 1lvl
+obj-71 | newobj | r slidepitch6
+obj-69 | newobj | r slidepitch5
+obj-12 | newobj | r slidepitch4
+obj-13 | newobj | r slidepitch3
+obj-14 | newobj | r slidepitch2
+obj-15 | newobj | r slidepitch1
+obj-288 | newobj | r 6mute
+obj-289 | newobj | r 5mute
+obj-290 | newobj | r 4mute
+obj-291 | newobj | r 3mute
+obj-292 | newobj | r 2mute
+obj-293 | newobj | r 1mute
+obj-257 | newobj | r 6amp
+obj-243 | newobj | r 5amp
+obj-235 | newobj | r 4amp
+obj-234 | newobj | r 3amp
+obj-160 | newobj | r 1amp
+obj-65 | newobj | r gpitch6
+obj-61 | newobj | r gpitch5
+obj-29 | newobj | r gpitch4
+obj-21 | newobj | r gpitch3
+obj-18 | newobj | r gpitch2
+obj-17 | newobj | r gpitch1
+obj-220 | newobj | s solo6
+obj-221 | newobj | s mute6
+obj-222 | newobj | == 0
+obj-223 | toggle | 
+obj-224 | toggle | 
+obj-225 | newobj | s solo5
+obj-226 | newobj | s mute5
+obj-227 | newobj | == 0
+obj-228 | toggle | 
+obj-229 | toggle | 
+obj-196 | newobj | s solo4
+obj-197 | newobj | s mute4
+obj-198 | newobj | == 0
+obj-199 | toggle | 
+obj-207 | toggle | 
+obj-191 | newobj | s solo3
+obj-192 | newobj | s mute3
+obj-193 | newobj | == 0
+obj-194 | toggle | 
+obj-195 | toggle | 
+obj-179 | newobj | s solo2
+obj-180 | newobj | s mute2
+obj-181 | newobj | == 0
+obj-182 | toggle | 
+obj-190 | toggle | 
+obj-178 | newobj | s solo1
+obj-177 | newobj | s mute1
+obj-162 | newobj | == 0
+obj-115 | toggle | 
+obj-114 | toggle | 
+obj-248 | slider | 
+obj-240 | slider | 
+obj-232 | slider | 
+obj-70 | slider | 
+obj-20 | slider | 
+obj-8 | slider | 
+obj-31 | newobj | r vol6
+obj-32 | newobj | togglecolor
+obj-277 | newobj | s vol6
+obj-276 | newobj | s vol5
+obj-275 | newobj | s vol4
+obj-274 | newobj | s vol3
+obj-273 | newobj | s vol2
+obj-272 | newobj | s vol1
+obj-236 | newobj | volcolor
+obj-237 | flonum | 
+obj-238 | newobj | volcolor
+obj-239 | flonum | 
+obj-241 | newobj | volcolor
+obj-242 | flonum | 
+obj-244 | newobj | volcolor
+obj-245 | flonum | 
+obj-246 | newobj | volcolor
+obj-247 | flonum | 
+obj-252 | newobj | volcolor
+obj-253 | flonum | 
+obj-188 | newobj | s pitch6
+obj-187 | newobj | s pitch5
+obj-186 | newobj | s pitch4
+obj-185 | newobj | s pitch3
+obj-184 | newobj | s pitch2
+obj-122 | flonum | 
+obj-119 | flonum | 
+obj-111 | flonum | 
+obj-108 | flonum | 
+obj-100 | flonum | 
+obj-97 | flonum | 
+obj-101 | message | 6
+obj-112 | message | 5
+obj-57 | message | 4
+obj-46 | message | 3
+obj-35 | message | 2
+obj-4 | message | 1
+obj-1 | comment | Pitch
+obj-22 | toggle | 
+obj-33 | newobj | r vol4
+obj-34 | newobj | togglecolor
+obj-36 | newobj | r vol5
+obj-37 | newobj | togglecolor
+obj-38 | toggle | 
+obj-39 | toggle | 
+obj-40 | newobj | r vol2
+obj-41 | newobj | togglecolor
+obj-42 | newobj | r vol3
+obj-43 | newobj | togglecolor
+obj-44 | toggle | 
+obj-45 | toggle | 
+obj-47 | newobj | r vol1
+obj-48 | newobj | togglecolor
+obj-49 | toggle | 
+obj-94 | newobj | controlmachine
+obj-107 | comment | R
+obj-106 | comment | L
+obj-103 | newobj | r mixout1
+obj-233 | newobj | solomachine
+obj-56 | newobj | soundmachine
+obj-408 | panel | 
+obj-409 | panel | 
+obj-pw1_slider | slider | 
+obj-pw1_send | newobj | s PW1
+obj-pw1_label | comment | Duty Cycle
