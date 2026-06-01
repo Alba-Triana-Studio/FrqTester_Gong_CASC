@@ -1,91 +1,184 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { X, Download, FileText } from 'lucide-react';
 
-export default function ReportModal({ isOpen, onClose, params, results }) {
-  const [sections, setSections] = useState({
-    part1: true,
-    part2: true,
-    part3: true
-  });
+export default function ReportModal({ isOpen, onClose, params, results, recommendedAWG }) {
+  const [sections, setSections] = useState({ part1: true, part2: true, part3: true });
 
   if (!isOpen) return null;
 
-  const handleToggle = (key) => {
-    setSections(prev => ({ ...prev, [key]: !prev[key] }));
+  const handleToggle = (key) => setSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const buildAssemblyDiagram = () => {
+    const { Vmax, Zamp, awg, usar_resonancia, usar_transformador } = params;
+    const { N, R_real, L_mH, C_res_uF, a_opt } = results;
+    const e = (x, d = 2) => (isFinite(x) ? x.toFixed(d) : '—');
+
+    const center = (s, w = 18) => {
+      s = String(s).slice(0, w);
+      const pad = w - s.length;
+      const l = Math.floor(pad / 2);
+      return ' '.repeat(l) + s + ' '.repeat(pad - l);
+    };
+    const tee = '   +--------+---------+';
+    const conn = '            |';
+    const lbl = (s, note) => `   |${center(s)}|${note ? '   ' + note : ''}`;
+
+    const lines = [];
+    lines.push(tee);
+    lines.push(lbl('AMPLIFICADOR', `Zamp = ${Zamp} ohm · Vmax = ${Vmax} V pico`));
+    lines.push(tee);
+    lines.push(`${conn}   senal de audio (100-2000 Hz)`);
+    if (usar_transformador) {
+      lines.push(tee);
+      lines.push(lbl('TRANSFORMADOR', `relacion a = ${e(a_opt)} : 1`));
+      lines.push(tee);
+      lines.push(conn);
+    }
+    if (usar_resonancia) {
+      lines.push(tee);
+      lines.push(lbl('CAPACITOR (C)', `C = ${e(C_res_uF, 3)} uF  (cancela X_L)`));
+      lines.push(tee);
+      lines.push(conn);
+    }
+    lines.push(tee);
+    lines.push(lbl('BOBINA  (nucleo E)', `N = ${N} vueltas · AWG ${awg}`));
+    lines.push(lbl('', `R = ${e(R_real)} ohm · L = ${e(L_mH, 1)} mH`));
+    lines.push(tee);
+    lines.push(`${conn}|   entrehierro de aire (sin contacto)`);
+    lines.push('    ~~~~~~~~~~~~~~~~~~~~~   GONG de bronce');
+    lines.push('                          -> corrientes de Foucault -> sonido');
+
+    return `\`\`\`text\n${lines.join('\n')}\n\`\`\`
+
+\`\`\`mermaid
+flowchart LR
+  A["Amplificador<br/>${Zamp} ohm · ${Vmax} V pico"]${usar_transformador ? ` --> X["Transformador<br/>${e(a_opt)}:1"]` : ''}${usar_transformador ? ' --> ' : ' --> '}${usar_resonancia ? `C["Capacitor serie<br/>${e(C_res_uF, 3)} µF"] --> ` : ''}B["Bobina núcleo E<br/>N ${N} · AWG ${awg}<br/>R ${e(R_real)} ohm · L ${e(L_mH, 1)} mH"]
+  B -. "entrehierro de aire" .-> G["Gong de bronce<br/>corrientes de Foucault"]
+\`\`\`
+`;
   };
 
   const generateMarkdown = () => {
-    const { V_max, AWG, R_target, l_vuelta, f, mu_eff, A_c, l_c, h_w, d_w } = params;
-    const { R_metro, diam_mm, l_total, N, L, XL, Z, I, FMM, turns_per_layer, num_layers, N_max, fill_percent } = results;
+    const {
+      Vmax, Rtarget, f, mu_eff, Ac, lc, awg, hw, dw, perim,
+      Zamp, usar_resonancia, usar_transformador,
+    } = params;
+    const {
+      d_cu_mm, d_ext_mm, A_wire, ohm_m, i_safe_rms, N_exact, N, l_total, R_real,
+      L_mH, omega, XL, Z, phi_deg, I_pico, FMM,
+      C_res_uF, C_res, I_res, FMM_res, FMM_op, Q, mult, P, P_avg,
+      a_opt, Z_refl, Z_load, match, I_op, I_op_rms, current_ok, current_use_pct,
+      turns_per_layer, layers_max, num_layers, N_max, fill_percent, overflow,
+    } = results;
+
+    const e = (x, d = 3) => (isFinite(x) ? x.toExponential(d) : '—');
+    const fx = (x, d = 2) => (isFinite(x) ? x.toFixed(d) : '—');
 
     let md = `# Reporte de Diseño de Bobina Electromagnética\n`;
-    md += `*Generado por Motor de Simulación Alba Triana Studio*\n\n`;
+    md += `*Coil Designer — Excitación acústica por inducción · Gong de bronce*\n\n`;
+    md += `> **Principio rector:** la FMM la limitan la potencia disipable y el volumen de cobre, no el nº de vueltas. `;
+    md += `Con el carrete lleno, FMM ∝ √P. El calibre fija la impedancia a la que trabaja el amplificador; `;
+    md += `la resonancia serie cancela X_L y multiplica la corriente por Q.\n\n`;
 
     if (sections.part1) {
-      md += `## 1. Datos Prácticos de Fabricación\n`;
-      md += `*Especificaciones constructivas físicas.*\n\n`;
-      md += `- **Calibre del Alambre (AWG)**: ${AWG}\n`;
-      md += `- **Diámetro del Alambre (con esmalte)**: ${diam_mm} mm\n`;
-      md += `- **Número Total de Vueltas (N)**: ${N.toFixed(0)} vueltas\n`;
-      md += `- **Longitud del Alambre Requerido**: ${l_total.toFixed(2)} metros\n`;
-      md += `- **Perímetro Promedio por Vuelta**: ${l_vuelta} m\n`;
-      md += `- **Tipo de Núcleo**: Abierto (Tipo E o similar)\n`;
-      md += `- **Área Transversal del Núcleo (A_c)**: ${(A_c * 10000).toFixed(1)} cm² (${A_c} m²)\n`;
-      md += `- **Longitud del Camino Magnético (l_c)**: ${l_c} m\n`;
-      md += `- **Ventana del Carrete (Alto x Profundidad)**: ${h_w} mm x ${d_w} mm\n`;
-      md += `- **Llenado del Carrete**: ${fill_percent.toFixed(1)}% (Máximo teórico: ${N_max} vueltas)\n\n`;
+      md += `## 1. Datos Prácticos de Fabricación\n\n`;
+      md += `- **Calibre del alambre (AWG)**: ${awg}`;
+      md += recommendedAWG ? ` · recomendado: **AWG ${recommendedAWG.awg}**\n` : `\n`;
+      md += `- **Diámetro del cobre desnudo**: ${fx(d_cu_mm, 3)} mm\n`;
+      md += `- **Diámetro exterior con esmalte**: ${fx(d_ext_mm, 3)} mm\n`;
+      md += `- **Número total de vueltas (N)**: ${N} vueltas\n`;
+      md += `- **Longitud total de alambre (L_w)**: ${fx(l_total, 2)} m\n`;
+      md += `- **Perímetro medio por vuelta**: ${perim} mm\n`;
+      md += `- **Tipo de núcleo**: 'E' abierto con entrehierro de aire (μ_eff = ${mu_eff})\n`;
+      md += `- **Área del núcleo (Ac)**: ${Ac} mm² = ${(Ac / 100).toFixed(1)} cm²\n`;
+      md += `- **Camino magnético (lc)**: ${lc} mm\n`;
+      md += `- **Ventana del carrete (alto × prof.)**: ${hw} mm × ${dw} mm\n`;
+      md += `- **Vueltas por capa / nº de capas**: ${turns_per_layer} / ${num_layers}\n`;
+      md += `- **Capacidad máx. del carrete (N_max)**: ${N_max} vueltas\n`;
+      md += `- **Factor de llenado**: ${isFinite(fill_percent) ? fx(fill_percent, 1) : '∞'} %`;
+      md += overflow ? ` ⚠ **EXCEDE EL CARRETE**\n\n` : `\n\n`;
     }
 
     if (sections.part2) {
-      const power = Math.pow(I, 2) * R_target; // Estimación RMS/Pico simplificada de disipación térmica (P=I^2*R)
-      md += `## 2. Especificaciones Técnicas y Operación\n`;
-      md += `*Características eléctricas, térmicas y magnéticas de funcionamiento.*\n\n`;
-      md += `- **Voltaje Máximo de Señal (Pico)**: ${V_max} V\n`;
-      md += `- **Frecuencia de Diseño Actual**: ${f} Hz\n`;
-      md += `- **Corriente Dinámica (I) a ${f}Hz**: ${I.toFixed(2)} A\n`;
-      md += `- **Potencia Disipada (Calor Estimado)**: ${power.toFixed(2)} W\n`;
-      md += `- **Resistencia DC Objetivo (Seguridad)**: ${R_target} Ω\n`;
-      md += `- **Impedancia AC (Z) a ${f}Hz**: ${Z.toFixed(2)} Ω\n`;
-      md += `- **Inductancia Calculada (L)**: ${(L * 1000).toFixed(4)} mH\n`;
-      md += `- **Fuerza Magnetomotriz Máxima (Empuje)**: ${FMM.toFixed(2)} Amperios-vuelta\n\n`;
+      md += `## 2. Especificaciones Técnicas y Operación\n\n`;
+      md += `### Diagrama de montaje\n\n`;
+      md += `Conexión en serie: amplificador → ${usar_transformador ? 'transformador → ' : ''}${usar_resonancia ? 'capacitor de resonancia → ' : ''}bobina sobre núcleo en 'E', enfrentada sin contacto al gong.\n\n`;
+      md += buildAssemblyDiagram();
+      md += `\n`;
+
+      md += `### Parámetros de operación\n\n`;
+      md += `- **Voltaje de pico (Vmax)**: ${Vmax} V (${fx(Vmax * 2, 2)} Vpp)\n`;
+      md += `- **Frecuencia de operación (f)**: ${f} Hz\n`;
+      md += `- **Resistencia DC de la bobina (Rtarget)**: ${Rtarget} Ω · real con N entero = ${fx(R_real, 2)} Ω\n`;
+      md += `- **Inductancia (L)**: ${fx(L_mH, 4)} mH\n`;
+      md += `- **Impedancia (Z) @ ${f} Hz**: ${fx(Z, 2)} Ω · fase φ = ${fx(phi_deg, 1)}°\n`;
+      md += `- **Adaptación al amplificador**: ve ${fx(Z_load, 1)} Ω frente a Zamp ${Zamp} Ω (${fx(match.ratio, 2)}×) → **${match.label}**\n`;
+      if (usar_resonancia) {
+        md += `- **Capacitor de resonancia serie (C)**: ${fx(C_res_uF, 3)} µF (${e(C_res)} F)\n`;
+        md += `- **Factor de calidad (Q)**: ${fx(Q, 1)} → multiplica la corriente ×${fx(mult, 1)}\n`;
+        md += `- **Corriente en resonancia (I_res)**: ${fx(I_res, 3)} A pico\n`;
+      } else {
+        md += `- **Corriente directa de pico (I)**: ${fx(I_pico, 4)} A\n`;
+      }
+      md += `- **Corriente de operación**: ${fx(I_op, 3)} A pico (${fx(I_op_rms, 3)} A rms) · `;
+      md += current_ok ? `seguro (${fx(current_use_pct, 0)}% del límite del AWG ${awg}, ${fx(i_safe_rms, 2)} A rms)\n` : `⚠ **SOBRECORRIENTE** para AWG ${awg} (límite ${fx(i_safe_rms, 2)} A rms) — sube el calibre\n`;
+      md += `- **Potencia disipada (P = I²·R)**: ${fx(P, 2)} W pico · ≈ ${fx(P_avg, 2)} W promedio\n`;
+      md += `- **FMM (empuje sobre el gong)**: ${fx(FMM_op, 1)} A·vuelta${usar_resonancia ? ` (resonancia) — directa serían ${fx(FMM, 1)}` : ''}\n`;
+      if (usar_transformador) {
+        md += `- **Transformador**: relación óptima ${fx(a_opt, 2)} : 1 → refleja la carga a ${fx(Z_refl, 1)} Ω\n`;
+      }
+      md += `\n`;
     }
 
     if (sections.part3) {
-      const mu_0 = "4π×10⁻⁷";
-      md += `## 3. Resolución Matemática\n`;
-      md += `*Fórmulas y cálculos explícitos que validan los resultados.*\n\n`;
-      
-      md += `### 3.1 Longitud total del alambre\n`;
-      md += `\`l_total = R_target / R_metro_AWG\`\n`;
-      md += `\`l_total = ${R_target} / ${R_metro.toFixed(5)} = ${l_total.toFixed(2)} m\`\n\n`;
+      md += `## 3. Resolución Matemática\n\n`;
+      md += `### Glosario\n`;
+      md += `- **ρ_Cu** = 1.724×10⁻⁸ Ω·m (resistividad del cobre @20 °C)\n`;
+      md += `- **μ₀** = 4π×10⁻⁷ H/m (permeabilidad del vacío)\n`;
+      md += `- **μ_eff** = ${mu_eff} · **Ac** = ${e(Ac / 1e6)} m² · **lc** = ${fx(lc / 1000, 3)} m\n`;
+      md += `- **l_vuelta** = ${fx(perim / 1000, 3)} m · **Vmax** = ${Vmax} V · **f** = ${f} Hz\n\n`;
 
-      md += `### 3.2 Número de vueltas (N)\n`;
-      md += `\`N = l_total / l_vuelta\`\n`;
-      md += `\`N = ${l_total.toFixed(2)} / ${l_vuelta} = ${N.toFixed(2)} vueltas\`\n\n`;
+      md += `### 3.1 Sección del cobre\n`;
+      md += `\`d_cobre = 0.127·92^((36-${awg})/39) = ${fx(d_cu_mm, 3)} mm\`\n`;
+      md += `\`A_wire = π·(d/2)² = ${e(A_wire)} m²\`  →  \`ρ/A = ${fx(ohm_m, 4)} Ω/m\`\n\n`;
 
-      md += `### 3.3 Inductancia (L)\n`;
-      md += `\`L = (N² · μ₀ · μ_eff · A_c) / l_c\`\n`;
-      md += `\`L = (${N.toFixed(1)}² · ${mu_0} · ${mu_eff} · ${A_c}) / ${l_c} = ${(L*1000).toFixed(4)} mH\`\n\n`;
+      md += `### 3.2 Número de vueltas\n`;
+      md += `\`N = Rtarget·A_wire/(ρ_Cu·l_vuelta) = ${fx(N_exact, 1)} → ${N} (⌊·⌋)\`\n`;
+      md += `\`L_w = N·l_vuelta = ${fx(l_total, 2)} m\`  ·  \`R_real = ρ·L_w/A_wire = ${fx(R_real, 2)} Ω\`\n\n`;
 
-      md += `### 3.4 Impedancia en AC (Z)\n`;
-      md += `\`Z = √(R_target² + (2πfL)²)\`\n`;
-      md += `\`Z = √(${R_target}² + (2π · ${f} · ${(L*1000).toFixed(2)}mH)²) = ${Z.toFixed(2)} Ω\`\n\n`;
+      md += `### 3.3 Inductancia\n`;
+      md += `\`L = μ₀·μ_eff·N²·Ac/lc = ${fx(L_mH, 4)} mH\`\n\n`;
 
-      md += `### 3.5 Corriente Dinámica (I)\n`;
-      md += `\`I = V_max / Z\`\n`;
-      md += `\`I = ${V_max} / ${Z.toFixed(2)} = ${I.toFixed(2)} A\`\n\n`;
+      md += `### 3.4 Impedancia en AC\n`;
+      md += `\`ω = 2πf = ${fx(omega, 0)} rad/s\`  ·  \`X_L = ωL = ${fx(XL, 1)} Ω\`\n`;
+      md += `\`Z = √(R²+X_L²) = ${fx(Z, 2)} Ω\`  ·  \`φ = atan2(X_L,R) = ${fx(phi_deg, 1)}°\`\n\n`;
 
-      md += `### 3.6 Fuerza Magnetomotriz (FMM)\n`;
-      md += `\`FMM = N · I\`\n`;
-      md += `\`FMM = ${N.toFixed(1)} · ${I.toFixed(2)} = ${FMM.toFixed(2)} A-vuelta\`\n\n`;
+      md += `### 3.5 Corriente y FMM (directa)\n`;
+      md += `\`I_pico = Vmax/Z = ${fx(I_pico, 4)} A\`  ·  \`FMM = N·I = ${fx(FMM, 2)} A·vuelta\`\n\n`;
 
-      md += `### 3.7 Capacidad del Carrete Físico\n`;
-      md += `\`Vueltas por capa = ⌊h_w / diam_alambre⌋ = ⌊${h_w} / ${diam_mm}⌋ = ${turns_per_layer}\`\n`;
-      md += `\`Capas totales = ⌊d_w / diam_alambre⌋ = ⌊${d_w} / ${diam_mm}⌋ = ${num_layers}\`\n`;
-      md += `\`N_max = ${turns_per_layer} · ${num_layers} = ${N_max} vueltas máx\`\n`;
-      md += `\`Llenado = (N / N_max) · 100 = ${fill_percent.toFixed(1)}%\`\n\n`;
+      md += `### 3.5b Resonancia serie\n`;
+      md += `\`C = 1/(ω²L) = ${fx(C_res_uF, 3)} µF\`\n`;
+      md += `\`I_res = Vmax/R = ${fx(I_res, 3)} A\`  ·  \`Q = X_L/R = ${fx(Q, 1)}\`\n`;
+      md += `\`FMM_res = N·I_res = ${fx(FMM_res, 1)} A·vuelta\`  ·  \`FMM_res/FMM = Z/R = ×${fx(mult, 1)}\`\n\n`;
+
+      md += `### 3.6 Potencia (límite físico de la FMM)\n`;
+      md += `\`P = I²·R = ${fx(P, 2)} W\` (pico) · ≈ ${fx(P_avg, 2)} W (promedio sinusoidal)\n`;
+      md += `> Como R ∝ N² a volumen de cobre fijo, **FMM ∝ √P**: subir N no aumenta la FMM si P es la misma.\n\n`;
+
+      md += `### 3.7 Adaptación de impedancia\n`;
+      md += `\`Carga que ve el ampli = ${usar_resonancia ? 'R (en resonancia)' : 'Z'} = ${fx(Z_load, 2)} Ω\`  vs  \`Zamp = ${Zamp} Ω\` → ${match.label}\n`;
+      if (usar_transformador) {
+        md += `\`a_opt = √(Z/Zamp) = ${fx(a_opt, 2)} : 1\`  ·  \`Z_reflejada = Z/a² = ${fx(Z_refl, 1)} Ω\`\n`;
+      }
+      md += `\n`;
+
+      md += `### 3.8 Capacidad del carrete por capas\n`;
+      md += `\`v/capa = ⌊hw/d_ext⌋ = ⌊${hw}/${fx(d_ext_mm, 3)}⌋ = ${turns_per_layer}\`\n`;
+      md += `\`capas usadas = ⌈N/v⌉ = ${num_layers}\`  ·  \`capas máx = ⌊dw/d_ext⌋ = ${layers_max}\`\n`;
+      md += `\`N_max = ${turns_per_layer}·${layers_max} = ${N_max}\`  ·  \`llenado = ${isFinite(fill_percent) ? fx(fill_percent, 1) : '∞'}%\`\n\n`;
     }
 
+    md += `---\n*Recuerda medir la bobina real con un LCR: L (y el capacitor de resonancia) es muy sensible al μ_eff de un núcleo en E abierto.*\n`;
     return md;
   };
 
@@ -95,7 +188,7 @@ export default function ReportModal({ isOpen, onClose, params, results }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Reporte_Bobina_AWG${params.AWG}.md`;
+    a.download = `Reporte_Bobina_AWG${params.awg}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -103,67 +196,44 @@ export default function ReportModal({ isOpen, onClose, params, results }) {
     onClose();
   };
 
-  return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.7)',
-      backdropFilter: 'blur(4px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 1000
-    }}>
-      <div className="glass-panel" style={{ width: '500px', maxWidth: '90%', position: 'relative' }}>
-        <button onClick={onClose} style={{
-          position: 'absolute', top: '16px', right: '16px',
-          background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer'
-        }}>
-          <X size={24} />
-        </button>
-        
-        <h2 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <FileText color="var(--accent-cyan)" /> Descargar Informe de Fabricación
-        </h2>
+  const anySelected = sections.part1 || sections.part2 || sections.part3;
 
-        <p style={{ color: 'var(--text-muted)', marginBottom: '24px', fontSize: '0.9rem' }}>
-          Selecciona las secciones que deseas incluir en tu reporte (.MD). El documento reflejará exactamente la configuración que tienes actualmente en pantalla.
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="glass-panel modal-card" onClick={(ev) => ev.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}><X size={24} /></button>
+
+        <h2 className="modal-title"><FileText color="var(--accent-cyan)" /> Exportar reporte (.md)</h2>
+        <p className="modal-desc">
+          Elige las secciones a incluir. El documento refleja exactamente la configuración actual en pantalla.
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-            <input type="checkbox" checked={sections.part1} onChange={() => handleToggle('part1')} style={{ marginTop: '4px', accentColor: 'var(--accent-cyan)' }} />
+        <div className="modal-options">
+          <label className="modal-option">
+            <input type="checkbox" checked={sections.part1} onChange={() => handleToggle('part1')} />
             <div>
-              <div style={{ fontWeight: 'bold' }}>1. Datos Prácticos de Fabricación</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Dimensiones del núcleo, calibre AWG, vueltas totales, etc. Sólo datos duros para el fabricante.</div>
+              <div className="modal-option-title">1 · Datos prácticos de fabricación</div>
+              <div className="modal-option-desc">AWG, diámetros, N, longitud de alambre, núcleo, carrete y llenado.</div>
             </div>
           </label>
-
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-            <input type="checkbox" checked={sections.part2} onChange={() => handleToggle('part2')} style={{ marginTop: '4px', accentColor: 'var(--accent-cyan)' }} />
+          <label className="modal-option">
+            <input type="checkbox" checked={sections.part2} onChange={() => handleToggle('part2')} />
             <div>
-              <div style={{ fontWeight: 'bold' }}>2. Especificaciones de Operación</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Frecuencias, voltaje, corriente RMS esperada, potencia/calor e impedancia.</div>
+              <div className="modal-option-title">2 · Especificaciones técnicas y operación</div>
+              <div className="modal-option-desc">Diagrama de montaje + Vmax, f, I, P, Z, adaptación, C, Q, FMM.</div>
             </div>
           </label>
-
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-            <input type="checkbox" checked={sections.part3} onChange={() => handleToggle('part3')} style={{ marginTop: '4px', accentColor: 'var(--accent-cyan)' }} />
+          <label className="modal-option">
+            <input type="checkbox" checked={sections.part3} onChange={() => handleToggle('part3')} />
             <div>
-              <div style={{ fontWeight: 'bold' }}>3. Resolución Matemática</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fórmulas desglosadas paso a paso con su resultado explícito.</div>
+              <div className="modal-option-title">3 · Resolución matemática</div>
+              <div className="modal-option-desc">Glosario y desglose paso a paso con todos los valores sustituidos.</div>
             </div>
           </label>
         </div>
 
-        <button 
-          onClick={downloadReport}
-          disabled={!sections.part1 && !sections.part2 && !sections.part3}
-          style={{
-            width: '100%', padding: '12px', borderRadius: '8px',
-            background: (sections.part1 || sections.part2 || sections.part3) ? 'var(--accent-cyan)' : '#333',
-            color: '#000', fontWeight: 'bold', fontSize: '1rem',
-            border: 'none', cursor: (sections.part1 || sections.part2 || sections.part3) ? 'pointer' : 'not-allowed',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
-        }}>
-          <Download size={20} /> Descargar Archivo .MD
+        <button className="modal-download" onClick={downloadReport} disabled={!anySelected}>
+          <Download size={20} /> Descargar archivo .md
         </button>
       </div>
     </div>

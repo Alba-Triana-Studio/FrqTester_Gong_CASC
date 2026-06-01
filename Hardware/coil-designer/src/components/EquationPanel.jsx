@@ -1,160 +1,149 @@
-import React, { useState } from 'react';
-import { ChevronRight, ChevronLeft } from 'lucide-react';
-import { AWG_TABLE } from '../engine/coilMath';
+import { useState } from 'react';
+import { ChevronRight, ChevronLeft, Sigma, Info } from 'lucide-react';
+
+function Eq({ n, title, formula, steps, result, desc, accent }) {
+  return (
+    <div className="eq-block">
+      <div className="eq-title">{n}. {title}</div>
+      <div className="eq-formula">
+        <div className="eq-symbolic">{formula}</div>
+        {steps && <div className="eq-steps">{steps}</div>}
+        <div className="eq-result" style={accent ? { color: accent } : undefined}>= {result}</div>
+      </div>
+      {desc && <div className="eq-desc">{desc}</div>}
+    </div>
+  );
+}
 
 export default function EquationPanel({ params, results }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const { V_max, AWG, R_target, l_vuelta, f, mu_eff, A_c, l_c, h_w, d_w } = params;
-  const { R_metro, diam_mm, l_total, N, L, XL, Z, I, FMM, turns_per_layer, num_layers, N_max, fill_percent } = results;
+  const { Vmax, Rtarget, f, mu_eff, Ac, lc, awg, perim, hw, Zamp, usar_resonancia, usar_transformador } = params;
+  const {
+    d_cu_mm, A_wire, ohm_m, N_exact, N, l_total, R_real,
+    L, L_mH, omega, XL, Z, phi_deg, I_pico, FMM,
+    C_res_uF, I_res, FMM_res, Q, mult, P, P_avg,
+    a_opt, Z_refl, Z_op, turns_per_layer, layers_max, num_layers, N_max, fill_percent,
+  } = results;
 
-  const mu_0_str = "4π×10⁻⁷";
+  const e = (x, d = 3) => (isFinite(x) ? x.toExponential(d) : '—');
+  const fx = (x, d = 2) => (isFinite(x) ? x.toFixed(d) : '—');
 
   return (
     <div className={`equation-panel-wrapper ${!isOpen ? 'closed' : ''}`}>
-      <button className="eq-toggle" onClick={() => setIsOpen(!isOpen)}>
+      <button className="eq-toggle" onClick={() => setIsOpen(!isOpen)} title="Panel de ecuaciones">
         {isOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
       </button>
 
       <div className="glass-panel equation-panel-content">
-        <h2 style={{ fontSize: '1.2rem', marginBottom: '16px', color: 'var(--text-main)' }}>
-          Constantes del Sistema
-        </h2>
-        
-        <div className="eq-block" style={{ fontSize: '0.85rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px' }}>
-              <strong>μ₀ (Permeabilidad del Vacío): {mu_0_str} H/m</strong>
-              <div style={{ color: 'var(--text-muted)', marginTop: '4px', fontSize: '0.8rem', lineHeight: '1.3' }}>Constante física que define cuánta resistencia ofrece el vacío a la creación de un campo magnético.</div>
-            </div>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px' }}>
-              <strong>μ_eff (Permeabilidad del Núcleo): {mu_eff}</strong>
-              <div style={{ color: 'var(--text-muted)', marginTop: '4px', fontSize: '0.8rem', lineHeight: '1.3' }}>Multiplicador que indica cuánto amplifica el metal del núcleo al campo magnético en comparación con el vacío (al ser un circuito abierto, es un valor bajo).</div>
-            </div>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px' }}>
-              <strong>A_c (Área Transversal): {A_c} m²</strong>
-              <div style={{ color: 'var(--text-muted)', marginTop: '4px', fontSize: '0.8rem', lineHeight: '1.3' }}>Área física de la cara del núcleo donde se enrolla la bobina. A mayor área, mayor flujo magnético.</div>
-            </div>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px' }}>
-              <strong>l_c (Longitud del Camino): {l_c} m</strong>
-              <div style={{ color: 'var(--text-muted)', marginTop: '4px', fontSize: '0.8rem', lineHeight: '1.3' }}>Distancia promedio que recorren las líneas de flujo magnético a través del bloque de hierro.</div>
-            </div>
+        <h2 className="panel-section-title"><Sigma size={18} /> Ecuaciones en vivo</h2>
+
+        {/* Principio físico */}
+        <div className="principle-box">
+          <Info size={16} className="principle-icon" />
+          <div>
+            La <strong>FMM máxima</strong> está limitada por la <strong>potencia disipable</strong>, no por N.
+            El número de vueltas adapta la impedancia; la <strong>resonancia serie</strong> multiplica la
+            corriente por el factor <strong>Q</strong>. A volumen de cobre fijo: <em>R ∝ N²</em> ⇒ <em>FMM ∝ √P</em>.
           </div>
-
-          <details style={{ background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px', cursor: 'pointer' }}>
-            <summary style={{ fontWeight: 'bold', color: 'var(--accent-cyan)' }}>Tabla de Resistencias AWG</summary>
-            <div style={{ marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-              {Object.entries(AWG_TABLE).map(([calibre, data]) => (
-                <div key={calibre} style={{ 
-                  padding: '4px', 
-                  background: parseInt(calibre) === AWG ? 'rgba(250, 204, 21, 0.2)' : 'transparent',
-                  border: parseInt(calibre) === AWG ? '1px solid var(--accent-yellow)' : '1px solid transparent',
-                  borderRadius: '4px',
-                  textAlign: 'center'
-                }}>
-                  <strong>#{calibre}</strong><br/>{data.res}Ω
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-              Valores en Ohmios por metro (Ω/m)
-            </div>
-          </details>
         </div>
 
-        <h2 style={{ fontSize: '1.2rem', marginBottom: '24px', color: 'var(--text-main)' }}>
-          Resolución Matemática
-        </h2>
+        {/* Glosario de constantes */}
+        <details className="glossary" open>
+          <summary>Constantes y variables</summary>
+          <ul className="glossary-list">
+            <li><b>ρ_Cu</b> = 1.724×10⁻⁸ Ω·m — resistividad del cobre @20 °C</li>
+            <li><b>μ₀</b> = 4π×10⁻⁷ H/m — permeabilidad del vacío</li>
+            <li><b>μ_eff</b> = {mu_eff} — permeabilidad relativa efectiva del núcleo</li>
+            <li><b>Ac</b> = {Ac} mm² = {e(Ac / 1e6)} m² — sección del núcleo</li>
+            <li><b>lc</b> = {lc} mm — camino magnético (incl. entrehierro)</li>
+            <li><b>l_vuelta</b> = {perim} mm — perímetro medio de una espira</li>
+            <li><b>Vmax</b> = {Vmax} V pico · <b>f</b> = {f} Hz · <b>Zamp</b> = {Zamp} Ω</li>
+          </ul>
+        </details>
 
-      <div className="eq-block">
-        <div className="eq-title">1. Longitud total del alambre (l_total)</div>
-        <div className="eq-formula">
-          l_total = R_target / R_metro_AWG<br/>
-          l_total = {R_target} / {R_metro.toFixed(5)}<br/>
-          l_total = <strong>{l_total.toFixed(2)} m</strong>
-        </div>
-        <div className="eq-desc">
-          Calcula cuántos metros de alambre AWG {AWG} se necesitan para alcanzar la resistencia objetivo de seguridad.
-        </div>
-      </div>
+        <Eq
+          n="3.1" title="Sección del cobre (A_wire)"
+          formula={<>A_wire = π·(d_cobre/2)²</>}
+          steps={<>d_cobre = 0.127·92^((36−{awg})/39) = {fx(d_cu_mm, 3)} mm</>}
+          result={<>{e(A_wire)} m² · ρ/A = {fx(ohm_m, 4)} Ω/m</>}
+          desc="Diámetro del cobre desnudo por la fórmula AWG; de ahí su sección."
+        />
 
-      <div className="eq-block">
-        <div className="eq-title">2. Número de vueltas (N)</div>
-        <div className="eq-formula">
-          N = l_total / l_vuelta<br/>
-          N = {l_total.toFixed(2)} / {l_vuelta}<br/>
-          N = <strong>{N.toFixed(2)} vueltas</strong>
-        </div>
-        <div className="eq-desc">
-          Divide la longitud total entre el perímetro del carrete físico. Alerta: Si N es muy alto, podría no caber físicamente.
-        </div>
-      </div>
+        <Eq
+          n="3.2" title="Número de vueltas (N)"
+          formula={<>N = Rtarget·A_wire / (ρ_Cu·l_vuelta)</>}
+          steps={<>N = {Rtarget}·{e(A_wire)} / ({e(1.724e-8, 2)}·{fx(perim / 1000, 3)}) = {fx(N_exact, 1)}</>}
+          result={<><strong>{N}</strong> vueltas (⌊·⌋) · L_w = {fx(l_total, 2)} m · R_real = {fx(R_real, 2)} Ω</>}
+          desc="Se redondea al entero inferior y se recalcula la resistencia real."
+        />
 
-      <div className="eq-block">
-        <div className="eq-title">3. Inductancia Estimada (L)</div>
-        <div className="eq-formula">
-          L = (N² · μ₀ · μ_eff · A_c) / l_c<br/>
-          L = ({N.toFixed(1)}² · {mu_0_str} · {mu_eff} · {A_c}) / {l_c}<br/>
-          L = <strong>{(L * 1000).toFixed(4)} mH</strong>
-        </div>
-        <div className="eq-desc">
-          Mide la capacidad de la bobina para inducir voltaje oponiéndose al cambio de corriente.
-        </div>
-      </div>
+        <Eq
+          n="3.3" title="Inductancia (L)"
+          formula={<>L = μ₀·μ_eff·N²·Ac / lc</>}
+          steps={<>L = (4π×10⁻⁷·{mu_eff}·{N}²·{e(Ac / 1e6)}) / {fx(lc / 1000, 3)}</>}
+          result={<><strong>{fx(L_mH, 4)} mH</strong></>}
+          desc="Modelo de reluctancia con μ_eff. Es una estimación: mídela con un LCR."
+        />
 
-      <div className="eq-block">
-        <div className="eq-title">4. Impedancia en AC (Z)</div>
-        <div className="eq-formula">
-          Z = √(R_target² + (2πfL)²)<br/>
-          Z = √({R_target}² + (2π · {f} · {(L*1000).toFixed(2)}mH)²)<br/>
-          Z = <strong>{Z.toFixed(2)} Ω</strong>
-        </div>
-        <div className="eq-desc">
-          La resistencia real que "ve" el amplificador. A mayor frecuencia, la inductancia dispara la impedancia limitando la corriente.
-        </div>
-      </div>
+        <Eq
+          n="3.4" title="Impedancia en AC (ω, X_L, Z, φ)"
+          formula={<>ω = 2πf · X_L = ωL · Z = √(R²+X_L²) · φ = atan2(X_L,R)</>}
+          steps={<>ω = {fx(omega, 0)} rad/s · X_L = {fx(XL, 1)} Ω</>}
+          result={<>Z = <strong>{fx(Z, 1)} Ω</strong> · φ = {fx(phi_deg, 1)}°</>}
+          desc="A mayor f, X_L domina y la impedancia ahoga la corriente."
+        />
 
-      <div className="eq-block">
-        <div className="eq-title">5. Corriente Dinámica (I)</div>
-        <div className="eq-formula">
-          I = V_max / Z<br/>
-          I = {V_max} / {Z.toFixed(2)}<br/>
-          I = <strong>{I.toFixed(2)} A</strong>
-        </div>
-        <div className="eq-desc">
-          Corriente eléctrica real que fluye por la bobina en el pico del voltaje.
-        </div>
-      </div>
+        <Eq
+          n="3.5" title="Corriente de pico y FMM (sin resonancia)"
+          formula={<>I_pico = Vmax/Z · FMM = N·I_pico</>}
+          steps={<>I = {Vmax}/{fx(Z, 1)} = {fx(I_pico, 4)} A</>}
+          result={<>FMM = <strong>{fx(FMM, 2)}</strong> A·vuelta</>}
+          accent="var(--accent-yellow)"
+          desc="Voltaje de pico aplicado directamente a la bobina."
+        />
 
-      <div className="eq-block">
-        <div className="eq-title">6. Fuerza Magnetomotriz (FMM)</div>
-        <div className="eq-formula">
-          FMM = N · I<br/>
-          FMM = {N.toFixed(1)} · {I.toFixed(2)}<br/>
-          FMM = <strong>{FMM.toFixed(2)} A-vuelta</strong>
-        </div>
-        <div className="eq-desc">
-          Magnitud de la fuerza de empuje magnético. Este es el valor a maximizar para obtener la mejor respuesta física en el Gong.
-        </div>
-      </div>
+        <Eq
+          n="3.5b" title="Resonancia serie (C, Q, I_res)"
+          formula={<>C = 1/(ω²L) · I_res = Vmax/R · Q = X_L/R</>}
+          steps={<>C = 1/({fx(omega, 0)}²·{fx(L, 5)}) = {fx(C_res_uF, 3)} µF</>}
+          result={<>I_res = {fx(I_res, 3)} A · FMM_res = <strong>{fx(FMM_res, 1)}</strong> · Q = {fx(Q, 0)}</>}
+          accent="var(--accent-cyan)"
+          desc={<>La reactancia se cancela y Z colapsa a R. Multiplicador FMM_res/FMM = Z/R = <strong>×{fx(mult, 1)}</strong>.</>}
+        />
 
-      <div className="eq-block">
-        <div className="eq-title">7. Capacidad del Carrete (Espacio Físico)</div>
-        <div className="eq-formula">
-          Vueltas por capa = ⌊h_w / diam_alambre⌋<br/>
-          Vueltas por capa = ⌊{params.h_w} / {diam_mm}⌋ = {turns_per_layer}<br/>
-          <br/>
-          Capas totales = ⌊d_w / diam_alambre⌋<br/>
-          Capas totales = ⌊{params.d_w} / {diam_mm}⌋ = {num_layers}<br/>
-          <br/>
-          N_max = {turns_per_layer} · {num_layers} = <strong>{N_max} vueltas máx</strong><br/>
-          Llenado = (N / N_max) · 100 = <strong>{fill_percent.toFixed(1)}%</strong>
-        </div>
-        <div className="eq-desc">
-          Calcula la cantidad máxima teórica de vueltas asumiendo un empaquetado cuadrado perfecto. Si el porcentaje de llenado supera el 100%, la bobina física se desbordará.
+        <Eq
+          n="3.6" title="Potencia disipada (calor) — límite real"
+          formula={<>P = I²·R {usar_resonancia ? '(I_res)' : '(I_pico)'}</>}
+          steps={<>P = {fx(usar_resonancia ? I_res : I_pico, 4)}²·{fx(R_real, 2)}</>}
+          result={<><strong>{fx(P, 2)} W</strong> pico · ≈ {fx(P_avg, 2)} W promedio</>}
+          accent="var(--accent-pink)"
+          desc="A cobre fijo R ∝ N², así que FMM ∝ √P: subir N no aumenta la FMM si P es la misma."
+        />
+
+        {usar_transformador && (
+          <Eq
+            n="3.7" title="Adaptación con transformador"
+            formula={<>a_opt = √(Z/Zamp) · Z_refl = Z/a²</>}
+            steps={<>a = √({fx(Z_op, 1)}/{Zamp}) = {fx(a_opt, 2)} : 1</>}
+            result={<>Z_reflejada = <strong>{fx(Z_refl, 1)} Ω</strong> (objetivo {Zamp} Ω)</>}
+            desc="Refleja la impedancia de la bobina a la del amplificador."
+          />
+        )}
+
+        <Eq
+          n="3.8" title="Factor de llenado del carrete"
+          formula={<>v/capa = ⌊hw/d_ext⌋ · capas = ⌈N/v⌉ · N_max = v·⌊dw/d_ext⌋</>}
+          steps={<>⌊{hw}/d_ext⌋ = {turns_per_layer} v/capa · {num_layers} capas · máx {layers_max} capas</>}
+          result={<>N_max = <strong>{N_max}</strong> · llenado = {isFinite(fill_percent) ? fx(fill_percent, 1) : '∞'}%</>}
+          desc="Empaquetado por capas con el diámetro esmaltado. >100 % no cabe físicamente."
+        />
+
+        <div className="lcr-warning">
+          <strong>⚠ Calibra con un LCR.</strong> L (y por tanto C de resonancia) es muy sensible al μ_eff real
+          de un núcleo en E abierto. Trata estos valores como punto de partida y mide la bobina física para afinar C.
         </div>
       </div>
     </div>
-  </div>
   );
 }
