@@ -58,7 +58,7 @@ export default function EquationPanel({ params, results }) {
             <li><b>Ac</b> = {Ac} mm² = {e(Ac / 1e6)} m² — sección del núcleo</li>
             <li><b>lc</b> = {lc} mm — camino magnético (incl. entrehierro)</li>
             <li><b>l_vuelta</b> = {perim} mm — perímetro medio de una espira</li>
-            <li><b>Vmax</b> = {Vmax} V pico · <b>f</b> = {f} Hz · <b>Zamp</b> = {Zamp} Ω</li>
+            <li><b>Vmax</b> = {Vmax} V pico (Vrms = {fx(Vmax / Math.SQRT2, 2)} V) · <b>f</b> = {f} Hz · <b>Zamp</b> = {Zamp} Ω</li>
           </ul>
         </details>
 

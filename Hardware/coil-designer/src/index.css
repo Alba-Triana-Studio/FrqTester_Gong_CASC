@@ -283,6 +283,18 @@ body {
 }
 .input-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.35; }
 
+.sub-input-group {
+  margin-left: 24px;
+  padding-left: 16px;
+  border-left: 2px dashed rgba(0, 240, 255, 0.2);
+  margin-top: -8px;
+  margin-bottom: 8px;
+  transition: border-color 0.2s ease;
+}
+.sub-input-group:focus-within {
+  border-left: 2px dashed var(--accent-cyan);
+}
+
 /* ---------- Toggles ---------- */
 .toggle-row {
   display: flex;

@@ -107,7 +107,7 @@ flowchart LR
       md += `\n`;
 
       md += `### Parámetros de operación\n\n`;
-      md += `- **Voltaje de pico (Vmax)**: ${Vmax} V (${fx(Vmax * 2, 2)} Vpp)\n`;
+      md += `- **Voltaje de pico (Vmax)**: ${Vmax} V (${fx(Vmax * 2, 2)} Vpp) · **Voltaje RMS**: ${fx(Vmax / Math.SQRT2, 2)} V\n`;
       md += `- **Frecuencia de operación (f)**: ${f} Hz\n`;
       md += `- **Resistencia DC de la bobina (Rtarget)**: ${Rtarget} Ω · real con N entero = ${fx(R_real, 2)} Ω\n`;
       md += `- **Inductancia (L)**: ${fx(L_mH, 4)} mH\n`;
@@ -145,7 +145,7 @@ flowchart LR
       md += `- **ρ_Cu** = 1.724×10⁻⁸ Ω·m (resistividad del cobre @20 °C)\n`;
       md += `- **μ₀** = 4π×10⁻⁷ H/m (permeabilidad del vacío)\n`;
       md += `- **μ_eff** = ${mu_eff} · **Ac** = ${e(Ac / 1e6)} m² · **lc** = ${fx(lc / 1000, 3)} m\n`;
-      md += `- **l_vuelta** = ${fx(perim / 1000, 3)} m · **Vmax** = ${Vmax} V · **f** = ${f} Hz\n\n`;
+      md += `- **l_vuelta** = ${fx(perim / 1000, 3)} m · **Vmax** = ${Vmax} V (Vrms = ${fx(Vmax / Math.SQRT2, 2)} V) · **f** = ${f} Hz\n\n`;
 
       md += `### 3.1 Sección del cobre\n`;
       md += `\`d_cobre = 0.127·92^((36-${awg})/39) = ${fx(d_cu_mm, 3)} mm\`\n`;

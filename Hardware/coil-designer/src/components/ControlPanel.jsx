@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { SlidersHorizontal, Magnet, CircuitBoard, Radio, Wand2, Lock, LockOpen, Sparkles } from 'lucide-react';
 
 function LockBtn({ locked, onLock }) {
@@ -62,6 +63,38 @@ function Toggle({ label, name, checked, onChange, hint, locked, onLock }) {
 }
 
 export default function ControlPanel({ params, setParams, results, recommendedAWG, locks = {}, toggleLock, onOptimize }) {
+  const [prevVmax, setPrevVmax] = useState(params.Vmax);
+  const [vmaxInput, setVmaxInput] = useState(params.Vmax.toString());
+  const [vrmsInput, setVrmsInput] = useState((params.Vmax / Math.SQRT2).toFixed(2));
+
+  // Sync state if changed from outside (e.g. optimizer or preset)
+  if (params.Vmax !== prevVmax) {
+    setPrevVmax(params.Vmax);
+    setVmaxInput(params.Vmax.toString());
+    setVrmsInput((params.Vmax / Math.SQRT2).toFixed(3).replace(/\.?0+$/, ''));
+  }
+
+  const handleVmaxChange = (e) => {
+    const valStr = e.target.value;
+    setVmaxInput(valStr);
+    const v = parseFloat(valStr);
+    if (!isNaN(v) && v >= 0) {
+      setParams((prev) => ({ ...prev, Vmax: v }));
+      setVrmsInput((v / Math.SQRT2).toFixed(3).replace(/\.?0+$/, ''));
+    }
+  };
+
+  const handleVrmsChange = (e) => {
+    const valStr = e.target.value;
+    setVrmsInput(valStr);
+    const v = parseFloat(valStr);
+    if (!isNaN(v) && v >= 0) {
+      const vmax = v * Math.SQRT2;
+      setParams((prev) => ({ ...prev, Vmax: parseFloat(vmax.toFixed(4)) }));
+      setVmaxInput(vmax.toFixed(3).replace(/\.?0+$/, ''));
+    }
+  };
+
   const handleNumber = (e) => {
     const { name, value } = e.target;
     const v = parseFloat(value);
@@ -83,9 +116,18 @@ export default function ControlPanel({ params, setParams, results, recommendedAW
 
       <NumberField {...lk('Vmax')}
         label="Voltaje de pico (Vmax)" name="Vmax" min={0.1} max={100} step={0.01}
-        value={params.Vmax} unit="V pico" onChange={handleNumber}
+        value={vmaxInput} unit="V pico" onChange={handleVmaxChange}
         hint={`≈ ${(params.Vmax * 2).toFixed(2)} Vpp`}
       />
+
+      <div className="sub-input-group">
+        <NumberField
+          label="Voltaje RMS" name="Vrms" min={0.07} max={70} step={0.01}
+          value={vrmsInput} unit="V RMS" onChange={handleVrmsChange}
+          hint="Calculado como Vmax / √2"
+          locked={!!locks.Vmax}
+        />
+      </div>
       <Slider {...lk('Rtarget')}
         label="Resistencia DC de la bobina (Rtarget)" name="Rtarget" min={1} max={32} step={0.5}
         value={params.Rtarget} unit="Ω" onChange={handleNumber}
