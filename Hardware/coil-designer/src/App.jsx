@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import ControlPanel from './components/ControlPanel';
 import DashboardCharts from './components/DashboardCharts';
 import EquationPanel from './components/EquationPanel';
@@ -16,7 +16,7 @@ import {
   generateForceCurve,
   generateTransformerCurve,
 } from './engine/coilMath';
-import { Activity, Zap, AlertTriangle, Download, Power, Radio, Gauge, CheckCircle2, Thermometer } from 'lucide-react';
+import { Activity, Zap, AlertTriangle, Download, Power, Radio, Gauge, CheckCircle2, Thermometer, Save, Upload } from 'lucide-react';
 
 const DEFAULT_PARAMS = {
   Vmax: 4.24,      // V pico (8.48 Vpp)
@@ -55,6 +55,52 @@ function App() {
   const [locks, setLocks] = useState(DEFAULT_LOCKS);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [optimizer, setOptimizer] = useState(null); // { criteria, options } | null
+  const fileInputRef = useRef(null);
+
+  const handleSaveSession = () => {
+    try {
+      const data = {
+        params,
+        locks,
+        version: "1.0.0",
+        timestamp: new Date().toISOString()
+      };
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Coil_Designer_Sesion_${params.awg}AWG_${params.f}Hz.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("Error al guardar la sesión: " + error.message);
+    }
+  };
+
+  const handleLoadSession = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        if (data && data.params && data.locks) {
+          setParams(data.params);
+          setLocks(data.locks);
+          e.target.value = ''; // Permite volver a cargar el mismo archivo si es necesario
+        } else {
+          alert("El archivo seleccionado no es una sesión válida de Coil Designer.");
+        }
+      } catch (err) {
+        alert("Error al procesar el archivo JSON: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const toggleLock = (name) => setLocks((prev) => ({ ...prev, [name]: !prev[name] }));
   const runOptimizer = () => setOptimizer(optimizeFMM(params, locks));
@@ -84,9 +130,24 @@ function App() {
             <Activity color="var(--accent-cyan)" /> Coil Designer
             <span className="app-subtitle">Excitación acústica por inducción · Gong de bronce</span>
           </h1>
-          <button className="report-btn" onClick={() => setIsReportModalOpen(true)}>
-            <Download size={18} /> Exportar Reporte
-          </button>
+          <div className="header-actions">
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              accept=".json"
+              onChange={handleLoadSession}
+            />
+            <button className="session-btn load" onClick={() => fileInputRef.current?.click()} title="Cargar Sesión desde archivo JSON">
+              <Upload size={18} /> Cargar Sesion
+            </button>
+            <button className="session-btn save" onClick={handleSaveSession} title="Guardar Sesión actual en archivo JSON">
+              <Save size={18} /> Guardar Sesion
+            </button>
+            <button className="report-btn" onClick={() => setIsReportModalOpen(true)}>
+              <Download size={18} /> Exportar Reporte
+            </button>
+          </div>
         </div>
 
         <div className="principle-banner">
