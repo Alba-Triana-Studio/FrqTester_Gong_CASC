@@ -3,6 +3,7 @@ import { X, Download, FileText } from 'lucide-react';
 
 export default function ReportModal({ isOpen, onClose, params, results, recommendedAWG }) {
   const [sections, setSections] = useState({ part1: true, part2: true, part3: true });
+  const [format, setFormat] = useState('md'); // 'md' o 'docx'
 
   if (!isOpen) return null;
 
@@ -196,17 +197,228 @@ flowchart LR
     return md;
   };
 
+  const convertMarkdownToHtml = (md) => {
+    let html = md
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Encabezados
+    html = html.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
+    html = html.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
+
+    // Citas / Blockquotes
+    html = html.replace(/^&gt;\s+(.*)$/gm, '<blockquote>$1</blockquote>');
+
+    // Negritas
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+    // Cursivas
+    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+    // Bloques de código
+    html = html.replace(/```text\s*([\s\S]*?)```/g, '<pre class="diagram-code"><code>$1</code></pre>');
+    html = html.replace(/```mermaid\s*([\s\S]*?)```/g, '<pre class="diagram-mermaid"><code>$1</code></pre>');
+
+    // Código inline y ecuaciones
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // Listas
+    html = html.replace(/^-\s+(.*)$/gm, '<li>$1</li>');
+
+    // Líneas
+    html = html.replace(/^---$/gm, '<hr/>');
+
+    // Agrupar listas y estructurar párrafos
+    const lines = html.split('\n');
+    let inList = false;
+    const processed = [];
+
+    for (let line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('<li>')) {
+        if (!inList) {
+          processed.push('<ul>');
+          inList = true;
+        }
+        processed.push(line);
+      } else {
+        if (inList) {
+          processed.push('</ul>');
+          inList = false;
+        }
+        if (trimmed && 
+            !trimmed.startsWith('<h') && 
+            !trimmed.startsWith('</h') && 
+            !trimmed.startsWith('<pre') && 
+            !trimmed.startsWith('</pre') && 
+            !trimmed.startsWith('<code') && 
+            !trimmed.startsWith('</code') && 
+            !trimmed.startsWith('<blockquote') && 
+            !trimmed.startsWith('</blockquote>') && 
+            !trimmed.startsWith('<ul') && 
+            !trimmed.startsWith('</ul') && 
+            !trimmed.startsWith('<hr') && 
+            !trimmed.startsWith('<li>')) {
+          processed.push(`<p>${line}</p>`);
+        } else {
+          processed.push(line);
+        }
+      }
+    }
+    if (inList) {
+      processed.push('</ul>');
+    }
+
+    return processed.join('\n');
+  };
+
+  const getWordTemplate = (content) => {
+    return `
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="utf-8">
+  <title>Reporte de Diseño de Bobina</title>
+  <!--[if gte mso 9]>
+  <xml>
+    <w:WordDocument>
+      <w:View>Print</w:View>
+      <w:Zoom>100</w:Zoom>
+      <w:DoNotOptimizeForBrowser/>
+    </w:WordDocument>
+  </xml>
+  <![endif]-->
+  <style>
+    @page {
+      size: letter;
+      margin: 1.0in 1.0in 1.0in 1.0in;
+      mso-header-margin: .5in;
+      mso-footer-margin: .5in;
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.6;
+      color: #1e293b;
+      background-color: #ffffff;
+    }
+    h1 {
+      font-size: 22pt;
+      color: #0f172a;
+      border-bottom: 2px solid #00c8ff;
+      padding-bottom: 6px;
+      margin-top: 24pt;
+      margin-bottom: 12pt;
+      font-weight: bold;
+    }
+    h2 {
+      font-size: 15pt;
+      color: #1e293b;
+      margin-top: 20pt;
+      margin-bottom: 10pt;
+      border-bottom: 1px solid #cbd5e1;
+      padding-bottom: 4px;
+      font-weight: bold;
+    }
+    h3 {
+      font-size: 12.5pt;
+      color: #0284c7;
+      margin-top: 16pt;
+      margin-bottom: 8pt;
+      font-weight: bold;
+    }
+    p, li {
+      margin-bottom: 8pt;
+      text-align: justify;
+    }
+    ul {
+      margin-top: 0;
+      margin-bottom: 14pt;
+      padding-left: 24px;
+    }
+    blockquote {
+      margin: 14pt 0;
+      padding: 10pt 14pt;
+      background-color: #f8fafc;
+      border-left: 4px solid #00c8ff;
+      color: #475569;
+      font-style: italic;
+      border-radius: 4px;
+    }
+    code {
+      font-family: Consolas, 'Courier New', monospace;
+      font-size: 10pt;
+      background-color: #f1f5f9;
+      color: #0f172a;
+      padding: 2px 4px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+    }
+    pre {
+      font-family: Consolas, 'Courier New', monospace;
+      font-size: 9.5pt;
+      background-color: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 12px;
+      margin: 14pt 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .diagram-code {
+      background-color: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-left: 4px solid #64748b;
+    }
+    .diagram-mermaid {
+      background-color: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-left: 4px solid #22c55e;
+      color: #166534;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #cbd5e1;
+      margin: 24pt 0;
+    }
+  </style>
+</head>
+<body>
+  <div style="max-width: 600px; margin: 0 auto;">
+    ${content}
+  </div>
+</body>
+</html>
+`;
+  };
+
   const downloadReport = () => {
-    const content = generateMarkdown();
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Reporte_Bobina_AWG${params.awg}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const markdownContent = generateMarkdown();
+    
+    if (format === 'md') {
+      const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Reporte_Bobina_AWG${params.awg}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      const htmlContent = convertMarkdownToHtml(markdownContent);
+      const fullDocContent = getWordTemplate(htmlContent);
+      const blob = new Blob([fullDocContent], { type: 'application/msword;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Reporte_Bobina_AWG${params.awg}.doc`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
     onClose();
   };
 
@@ -217,7 +429,9 @@ flowchart LR
       <div className="glass-panel modal-card" onClick={(ev) => ev.stopPropagation()}>
         <button className="modal-close" onClick={onClose}><X size={24} /></button>
 
-        <h2 className="modal-title"><FileText color="var(--accent-cyan)" /> Exportar reporte (.md)</h2>
+        <h2 className="modal-title">
+          <FileText color="var(--accent-cyan)" /> Exportar reporte ({format === 'md' ? '.md' : '.doc'})
+        </h2>
         <p className="modal-desc">
           Elige las secciones a incluir. El documento refleja exactamente la configuración actual en pantalla.
         </p>
@@ -246,8 +460,30 @@ flowchart LR
           </label>
         </div>
 
+        <div className="modal-format-section" style={{ marginBottom: '22px' }}>
+          <div className="modal-option-title" style={{ marginBottom: '8px', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+            Formato del Reporte:
+          </div>
+          <div className="seg">
+            <button 
+              type="button" 
+              className={format === 'md' ? 'on' : ''} 
+              onClick={() => setFormat('md')}
+            >
+              Markdown (.md)
+            </button>
+            <button 
+              type="button" 
+              className={format === 'docx' ? 'on' : ''} 
+              onClick={() => setFormat('docx')}
+            >
+              Documento Word (.doc)
+            </button>
+          </div>
+        </div>
+
         <button className="modal-download" onClick={downloadReport} disabled={!anySelected}>
-          <Download size={20} /> Descargar archivo .md
+          <Download size={20} /> Descargar archivo {format === 'md' ? '.md' : '.doc'}
         </button>
       </div>
     </div>
