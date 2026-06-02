@@ -3,13 +3,18 @@ import ControlPanel from './components/ControlPanel';
 import DashboardCharts from './components/DashboardCharts';
 import EquationPanel from './components/EquationPanel';
 import ReportModal from './components/ReportModal';
+import AdvicePanel from './components/AdvicePanel';
+import TransformerPanel from './components/TransformerPanel';
+import OptimizerModal from './components/OptimizerModal';
 import {
   calculateCoil,
   recommendAWG,
+  optimizeFMM,
   generateImpedanceCurve,
   generateCurrentCurve,
   generateAWGComparison,
   generateForceCurve,
+  generateTransformerCurve,
 } from './engine/coilMath';
 import { Activity, Zap, AlertTriangle, Download, Power, Radio, Gauge, CheckCircle2, Thermometer } from 'lucide-react';
 
@@ -27,13 +32,33 @@ const DEFAULT_PARAMS = {
   Zamp: 8,         // Ω impedancia del amplificador
   usar_transformador: false,
   usar_resonancia: true,
+  // Transformador de adaptación T1
+  modo_relacion: 'auto',  // 'auto' | 'manual'
+  a_manual: 3,            // relación a = V_sec/V_pri (modo manual)
+  R_pri: 2.2,            // Ω resistencia del primario de T1
+  R_sec: 0.2,           // Ω resistencia del secundario de T1
+  acoplamiento_k: 0.98, // coeficiente de acoplamiento (0–1)
 };
 
 const MATCH_COLOR = { ok: 'var(--accent-green)', low: 'var(--accent-pink)', high: 'var(--accent-yellow)', na: 'var(--text-muted)' };
 
+// Variables que se pueden bloquear para el optimizador. Por defecto se bloquea
+// el amplificador (Vmax, Zamp) y la frecuencia de trabajo: son datos fijos.
+const DEFAULT_LOCKS = {
+  Vmax: true, Rtarget: false, f: true, mu_eff: false, Ac: false, lc: false,
+  awg: false, hw: false, dw: false, perim: false, Zamp: true,
+  usar_resonancia: false, usar_transformador: false,
+};
+
 function App() {
   const [params, setParams] = useState(DEFAULT_PARAMS);
+  const [locks, setLocks] = useState(DEFAULT_LOCKS);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [optimizer, setOptimizer] = useState(null); // { criteria, options } | null
+
+  const toggleLock = (name) => setLocks((prev) => ({ ...prev, [name]: !prev[name] }));
+  const runOptimizer = () => setOptimizer(optimizeFMM(params, locks));
+  const applyOption = (cfg) => setParams((prev) => ({ ...prev, ...cfg }));
 
   const results = useMemo(() => calculateCoil(params), [params]);
   const recommendedAWG = useMemo(() => recommendAWG(params), [params]);
@@ -41,13 +66,17 @@ function App() {
   const currentData = useMemo(() => generateCurrentCurve(params), [params]);
   const awgData = useMemo(() => generateAWGComparison(params), [params]);
   const forceData = useMemo(() => generateForceCurve(params), [params]);
+  const transformerData = useMemo(() => generateTransformerCurve(params), [params]);
 
   const res = params.usar_resonancia;
   const match = results.match;
 
   return (
     <div className="app-container">
-      <ControlPanel params={params} setParams={setParams} results={results} recommendedAWG={recommendedAWG} />
+      <ControlPanel
+        params={params} setParams={setParams} results={results} recommendedAWG={recommendedAWG}
+        locks={locks} toggleLock={toggleLock} onOptimize={runOptimizer}
+      />
 
       <div className="dashboard-main">
         <div className="dashboard-header">
@@ -76,12 +105,14 @@ function App() {
               {match.status === 'ok' ? <CheckCircle2 size={13} className="ic" /> : <AlertTriangle size={13} className="ic" />} Adaptación al ampli
             </span>
             <span className="metric-value" style={{ color: MATCH_COLOR[match.status], fontSize: '1.25rem' }}>{match.label}</span>
-            <span className="metric-sub">ve {results.Z_load.toFixed(1)}Ω · Zamp {params.Zamp}Ω ({match.ratio.toFixed(2)}×)</span>
+            <span className="metric-sub">
+              {params.usar_transformador ? 'con T1 ve' : 've'} {results.Z_seen.toFixed(1)}Ω · Zamp {params.Zamp}Ω ({match.ratio.toFixed(2)}×)
+            </span>
           </div>
 
           <div className="glass-panel metric-card" style={{ borderColor: 'var(--accent-yellow)' }}>
             <span className="metric-label" style={{ color: 'var(--accent-yellow)' }}>
-              <Zap size={13} className="ic" /> FMM {res ? '(resonancia)' : '(directa)'}
+              <Zap size={13} className="ic" /> FMM {params.usar_transformador ? (res ? '(T1+res)' : '(con T1)') : res ? '(resonancia)' : '(directa)'}
             </span>
             <span className="metric-value" style={{ color: 'var(--accent-yellow)' }}>{results.FMM_op.toFixed(0)}</span>
             <span className="metric-sub">A·vuelta de empuje sobre el gong</span>
@@ -118,11 +149,20 @@ function App() {
           </div>
         </div>
 
+        {/* Consejo de optimización (cubre las 4 combinaciones de toggles) */}
+        <AdvicePanel advice={results.advice} />
+
+        {/* Especificaciones de T1 (solo si el transformador está activo) */}
+        {params.usar_transformador && (
+          <TransformerPanel params={params} results={results} transformerData={transformerData} />
+        )}
+
         <DashboardCharts
           impedanceData={impedanceData}
           currentData={currentData}
           awgData={awgData}
           forceData={forceData}
+          transformerData={transformerData}
           params={params}
           results={results}
           recommendedAWG={recommendedAWG}
@@ -137,6 +177,12 @@ function App() {
         params={params}
         results={results}
         recommendedAWG={recommendedAWG}
+      />
+
+      <OptimizerModal
+        data={optimizer}
+        onApply={applyOption}
+        onClose={() => setOptimizer(null)}
       />
     </div>
   );

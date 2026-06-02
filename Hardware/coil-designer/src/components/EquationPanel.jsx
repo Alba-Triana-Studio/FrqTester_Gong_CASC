@@ -21,9 +21,9 @@ export default function EquationPanel({ params, results }) {
   const { Vmax, Rtarget, f, mu_eff, Ac, lc, awg, perim, hw, Zamp, usar_resonancia, usar_transformador } = params;
   const {
     d_cu_mm, A_wire, ohm_m, N_exact, N, l_total, R_real,
-    L, L_mH, omega, XL, Z, phi_deg, I_pico, FMM,
+    L, L_mH, omega, XL, Z, Zcoil_op, phi_deg, I_pico, FMM,
     C_res_uF, I_res, FMM_res, Q, mult, P, P_avg,
-    a_opt, Z_refl, Z_op, turns_per_layer, layers_max, num_layers, N_max, fill_percent,
+    Z_refl, tx, turns_per_layer, layers_max, num_layers, N_max, fill_percent,
   } = results;
 
   const e = (x, d = 3) => (isFinite(x) ? x.toExponential(d) : '—');
@@ -122,13 +122,48 @@ export default function EquationPanel({ params, results }) {
         />
 
         {usar_transformador && (
-          <Eq
-            n="3.7" title="Adaptación con transformador"
-            formula={<>a_opt = √(Z/Zamp) · Z_refl = Z/a²</>}
-            steps={<>a = √({fx(Z_op, 1)}/{Zamp}) = {fx(a_opt, 2)} : 1</>}
-            result={<>Z_reflejada = <strong>{fx(Z_refl, 1)} Ω</strong> (objetivo {Zamp} Ω)</>}
-            desc="Refleja la impedancia de la bobina a la del amplificador."
-          />
+          <>
+            <div className="principle-box" style={{ background: 'rgba(168,85,247,0.10)', borderColor: 'rgba(168,85,247,0.4)' }}>
+              <Info size={16} style={{ color: '#a855f7', flexShrink: 0 }} />
+              <div>
+                <strong>Convención:</strong> <em style={{ color: '#c084fc', fontStyle: 'normal' }}>a = V_secundario / V_primario</em> (a&gt;1 = elevador).
+                La impedancia reflejada al primario va por <strong>1/a²</strong>. El transformador adapta impedancia: no crea FMM ni potencia.
+              </div>
+            </div>
+
+            <Eq
+              n="3.7a" title="Relación óptima (auto)"
+              formula={<>a_opt = √(|Z_bobina(f_op)| / Zamp)</>}
+              steps={<>a = √({fx(Zcoil_op, 1)}/{Zamp}){usar_resonancia ? ' (Z_bobina≈R por resonancia)' : ''}</>}
+              result={<>a = <strong>{fx(tx.a, 2)}</strong> · vueltas {tx.turns_ratio}</>}
+              accent="#c084fc"
+              desc="Con resonancia, Z_bobina≈R en f_op, así que a sale mucho menor."
+            />
+            <Eq
+              n="3.7b" title="Lo que ve el amplificador"
+              formula={<>Z_amp_ve = R_pri + Z_bobina/a²</>}
+              steps={<>= {params.R_pri} + {fx(Zcoil_op, 1)}/{fx(tx.a * tx.a, 2)}</>}
+              result={<>Z_reflejada = {fx(Z_refl, 1)} Ω · ve = <strong>{fx(tx.Zve, 1)} Ω</strong> (Zamp {Zamp})</>}
+              accent="#c084fc"
+              desc="Incluye la R del primario de T1; por eso el mínimo no toca Zamp exacto."
+            />
+            <Eq
+              n="3.7c" title="Tensión y corrientes"
+              formula={<>V_sec = a·V_pri · I_amp = a·I_bobina</>}
+              steps={<>V_sec = {fx(tx.V_sec, 2)} V · I_amp = {fx(tx.I_amp, 3)} A</>}
+              result={<>I_bobina = <strong>{fx(tx.I_bobina, 3)} A</strong> = V_sec/|Z_bobina|</>}
+              accent="var(--accent-yellow)"
+              desc="La FMM la da I_bobina (secundario), no la corriente del primario."
+            />
+            <Eq
+              n="3.7d" title="Potencia y eficiencia (balance)"
+              formula={<>η = P_bobina / (P_bobina + P_pérdida_T1)</>}
+              steps={<>P_ampli {fx(tx.P_total, 2)} = bobina {fx(tx.P_bobina, 2)} + pérdidas {fx(tx.P_loss, 2)} W</>}
+              result={<>η = <strong>{fx(tx.eta, 0)} %</strong> · balance {tx.balance_ok ? '✓' : '✗ (bug)'}</>}
+              accent={tx.eta >= 80 ? 'var(--accent-green)' : 'var(--accent-pink)'}
+              desc="P entregada = P en bobina + pérdidas T1. Siempre debe cerrar."
+            />
+          </>
         )}
 
         <Eq

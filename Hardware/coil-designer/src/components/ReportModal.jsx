@@ -10,7 +10,7 @@ export default function ReportModal({ isOpen, onClose, params, results, recommen
 
   const buildAssemblyDiagram = () => {
     const { Vmax, Zamp, awg, usar_resonancia, usar_transformador } = params;
-    const { N, R_real, L_mH, C_res_uF, a_opt } = results;
+    const { N, R_real, L_mH, C_res_uF, tx } = results;
     const e = (x, d = 2) => (isFinite(x) ? x.toFixed(d) : '—');
 
     const center = (s, w = 18) => {
@@ -30,7 +30,7 @@ export default function ReportModal({ isOpen, onClose, params, results, recommen
     lines.push(`${conn}   senal de audio (100-2000 Hz)`);
     if (usar_transformador) {
       lines.push(tee);
-      lines.push(lbl('TRANSFORMADOR', `relacion a = ${e(a_opt)} : 1`));
+      lines.push(lbl('TRANSFORMADOR', `a = ${e(tx.a)} (V_sec/V_pri)`));
       lines.push(tee);
       lines.push(conn);
     }
@@ -52,7 +52,7 @@ export default function ReportModal({ isOpen, onClose, params, results, recommen
 
 \`\`\`mermaid
 flowchart LR
-  A["Amplificador<br/>${Zamp} ohm · ${Vmax} V pico"]${usar_transformador ? ` --> X["Transformador<br/>${e(a_opt)}:1"]` : ''}${usar_transformador ? ' --> ' : ' --> '}${usar_resonancia ? `C["Capacitor serie<br/>${e(C_res_uF, 3)} µF"] --> ` : ''}B["Bobina núcleo E<br/>N ${N} · AWG ${awg}<br/>R ${e(R_real)} ohm · L ${e(L_mH, 1)} mH"]
+  A["Amplificador<br/>${Zamp} ohm · ${Vmax} V pico"]${usar_transformador ? ` --> X["Transformador T1<br/>a = ${e(tx.a)}"]` : ''} --> ${usar_resonancia ? `C["Capacitor serie<br/>${e(C_res_uF, 3)} µF"] --> ` : ''}B["Bobina núcleo E<br/>N ${N} · AWG ${awg}<br/>R ${e(R_real)} ohm · L ${e(L_mH, 1)} mH"]
   B -. "entrehierro de aire" .-> G["Gong de bronce<br/>corrientes de Foucault"]
 \`\`\`
 `;
@@ -65,9 +65,9 @@ flowchart LR
     } = params;
     const {
       d_cu_mm, d_ext_mm, A_wire, ohm_m, i_safe_rms, N_exact, N, l_total, R_real,
-      L_mH, omega, XL, Z, phi_deg, I_pico, FMM,
+      L_mH, omega, XL, Z, Zcoil_op, phi_deg, I_pico, FMM,
       C_res_uF, C_res, I_res, FMM_res, FMM_op, Q, mult, P, P_avg,
-      a_opt, Z_refl, Z_load, match, I_op, I_op_rms, current_ok, current_use_pct,
+      a_opt, Z_load, Z_seen, match, tx, I_op, I_op_rms, current_ok, current_use_pct,
       turns_per_layer, layers_max, num_layers, N_max, fill_percent, overflow,
     } = results;
 
@@ -112,7 +112,7 @@ flowchart LR
       md += `- **Resistencia DC de la bobina (Rtarget)**: ${Rtarget} Ω · real con N entero = ${fx(R_real, 2)} Ω\n`;
       md += `- **Inductancia (L)**: ${fx(L_mH, 4)} mH\n`;
       md += `- **Impedancia (Z) @ ${f} Hz**: ${fx(Z, 2)} Ω · fase φ = ${fx(phi_deg, 1)}°\n`;
-      md += `- **Adaptación al amplificador**: ve ${fx(Z_load, 1)} Ω frente a Zamp ${Zamp} Ω (${fx(match.ratio, 2)}×) → **${match.label}**\n`;
+      md += `- **Adaptación al amplificador**: ${usar_transformador ? 'a través de T1 ve' : 've'} ${fx(Z_seen, 1)} Ω frente a Zamp ${Zamp} Ω (${fx(match.ratio, 2)}×) → **${match.label}**\n`;
       if (usar_resonancia) {
         md += `- **Capacitor de resonancia serie (C)**: ${fx(C_res_uF, 3)} µF (${e(C_res)} F)\n`;
         md += `- **Factor de calidad (Q)**: ${fx(Q, 1)} → multiplica la corriente ×${fx(mult, 1)}\n`;
@@ -124,10 +124,19 @@ flowchart LR
       md += current_ok ? `seguro (${fx(current_use_pct, 0)}% del límite del AWG ${awg}, ${fx(i_safe_rms, 2)} A rms)\n` : `⚠ **SOBRECORRIENTE** para AWG ${awg} (límite ${fx(i_safe_rms, 2)} A rms) — sube el calibre\n`;
       md += `- **Potencia disipada (P = I²·R)**: ${fx(P, 2)} W pico · ≈ ${fx(P_avg, 2)} W promedio\n`;
       md += `- **FMM (empuje sobre el gong)**: ${fx(FMM_op, 1)} A·vuelta${usar_resonancia ? ` (resonancia) — directa serían ${fx(FMM, 1)}` : ''}\n`;
-      if (usar_transformador) {
-        md += `- **Transformador**: relación óptima ${fx(a_opt, 2)} : 1 → refleja la carga a ${fx(Z_refl, 1)} Ω\n`;
-      }
       md += `\n`;
+
+      if (usar_transformador) {
+        md += `### Transformador de adaptación T1\n\n`;
+        md += `- **Relación a = V_sec/V_pri**: ${fx(tx.a, 2)} (inversa ${fx(tx.a_inv, 2)}) · vueltas pri:sec ≈ ${tx.turns_ratio} · modo ${tx.mode}\n`;
+        md += `- **Impedancia reflejada a f_op**: ${fx(tx.Z_refl_mag, 1)} Ω · el ampli ve ${fx(tx.Zve, 1)} Ω (objetivo ${Zamp} Ω)\n`;
+        md += `- **Tensión de pico en el secundario (V_sec)**: ${fx(tx.V_sec, 2)} V\n`;
+        md += `- **Corriente de primario (I_amp)**: ${fx(tx.I_amp, 3)} A · **secundario (I_bobina)**: ${fx(tx.I_bobina, 3)} A\n`;
+        md += `- **Reparto de potencia**: bobina ${fx(tx.P_bobina, 2)} W · pérdidas T1 ${fx(tx.P_loss, 2)} W (R_pri ${fx(tx.P_Rpri, 2)} + R_sec ${fx(tx.P_Rsec, 2)} + acoplamiento ${fx(tx.P_coupling, 2)})\n`;
+        md += `- **Eficiencia de acoplamiento (η)**: ${fx(tx.eta, 0)} % · balance energético ${tx.balance_ok ? '✓ cierra' : '✗ ROTO (bug)'}\n`;
+        md += `- **Saturación de T1**: ${tx.sat_risk ? `⚠ riesgo a ${f} Hz con V_sec = ${fx(tx.V_sec, 1)} V (B ∝ V_sec/f) — usa un núcleo mayor para T1` : 'sin riesgo aparente; vigila a frecuencias bajas con V_sec alto'}\n`;
+        md += `\n`;
+      }
     }
 
     if (sections.part3) {
@@ -166,9 +175,14 @@ flowchart LR
       md += `> Como R ∝ N² a volumen de cobre fijo, **FMM ∝ √P**: subir N no aumenta la FMM si P es la misma.\n\n`;
 
       md += `### 3.7 Adaptación de impedancia\n`;
-      md += `\`Carga que ve el ampli = ${usar_resonancia ? 'R (en resonancia)' : 'Z'} = ${fx(Z_load, 2)} Ω\`  vs  \`Zamp = ${Zamp} Ω\` → ${match.label}\n`;
+      md += `\`Carga de la bobina = ${usar_resonancia ? 'R (en resonancia)' : 'Z'} = ${fx(Z_load, 2)} Ω\`  vs  \`Zamp = ${Zamp} Ω\` → ${match.label}\n\n`;
       if (usar_transformador) {
-        md += `\`a_opt = √(Z/Zamp) = ${fx(a_opt, 2)} : 1\`  ·  \`Z_reflejada = Z/a² = ${fx(Z_refl, 1)} Ω\`\n`;
+        md += `**Transformador T1** (convención a = V_sec/V_pri):\n`;
+        md += `\`a_opt = √(|Z_bobina(f_op)|/Zamp) = √(${fx(Zcoil_op, 2)}/${Zamp}) = ${fx(a_opt, 2)}\`\n`;
+        md += `\`Z_reflejada = Z_bobina/a² = ${fx(tx.Z_refl_mag, 2)} Ω\`  ·  \`Z_amp_ve = R_pri + Z/a² = ${fx(tx.Zve, 2)} Ω\`\n`;
+        md += `\`V_sec = a·V_pri ⇒ ${fx(tx.V_sec, 2)} V\`  ·  \`I_bobina = V_sec/|Z_bobina| = ${fx(tx.I_bobina, 3)} A\`  ·  \`I_amp = a·I_bobina = ${fx(tx.I_amp, 3)} A\`\n`;
+        md += `\`η = P_bobina/(P_bobina+P_pérdida_T1) = ${fx(tx.P_bobina, 2)}/(${fx(tx.P_bobina, 2)}+${fx(tx.P_loss, 2)}) = ${fx(tx.eta, 0)} %\`\n`;
+        md += `> **Verificación de conservación**: P_ampli = ${fx(tx.P_total, 3)} W ; P_bobina + pérdidas = ${fx(tx.P_bobina + tx.P_loss, 3)} W → ${tx.balance_ok ? 'cierra ✓' : 'NO cierra ✗ (bug)'}\n`;
       }
       md += `\n`;
 
