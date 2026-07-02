@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef } from 'react';
 import ControlPanel from './components/ControlPanel';
 import DashboardCharts from './components/DashboardCharts';
+import DiagramPanel from './components/DiagramPanel';
 import EquationPanel from './components/EquationPanel';
 import ReportModal from './components/ReportModal';
 import AdvicePanel from './components/AdvicePanel';
@@ -9,14 +10,16 @@ import OptimizerModal from './components/OptimizerModal';
 import {
   calculateCoil,
   recommendAWG,
-  optimizeFMM,
+  optimizeForce,
   generateImpedanceCurve,
   generateCurrentCurve,
   generateAWGComparison,
   generateForceCurve,
   generateTransformerCurve,
+  fmtForce,
+  GONG_DEFAULTS,
 } from './engine/coilMath';
-import { Activity, Zap, AlertTriangle, Download, Power, Radio, Gauge, CheckCircle2, Thermometer, Save, Upload } from 'lucide-react';
+import { Activity, Zap, AlertTriangle, Download, Power, Radio, Gauge, CheckCircle2, Thermometer, Save, Upload, Waves, Magnet } from 'lucide-react';
 
 const DEFAULT_PARAMS = {
   Vmax: 4.24,      // V pico (8.48 Vpp)
@@ -38,6 +41,12 @@ const DEFAULT_PARAMS = {
   R_pri: 2.2,            // Ω resistencia del primario de T1
   R_sec: 0.2,           // Ω resistencia del secundario de T1
   acoplamiento_k: 0.98, // coeficiente de acoplamiento (0–1)
+  // Capacitor de resonancia serie
+  modo_capacitor: 'auto',   // 'auto' | 'manual'
+  C_manual_uF: 10,          // µF capacitor de acople en modo manual
+  filtrar_comerciales: false, // ajustar a valores comerciales (E12)
+  // Acoplamiento al gong (gap, w_polo, rho_t, t_gong, B_sat, LCR opcional)
+  ...GONG_DEFAULTS,
 };
 
 const MATCH_COLOR = { ok: 'var(--accent-green)', low: 'var(--accent-pink)', high: 'var(--accent-yellow)', na: 'var(--text-muted)' };
@@ -47,6 +56,7 @@ const MATCH_COLOR = { ok: 'var(--accent-green)', low: 'var(--accent-pink)', high
 const DEFAULT_LOCKS = {
   Vmax: true, Rtarget: false, f: true, mu_eff: false, Ac: false, lc: false,
   awg: false, hw: false, dw: false, perim: false, Zamp: true,
+  gap: true, w_polo: false,
   usar_resonancia: false, usar_transformador: false,
 };
 
@@ -62,7 +72,7 @@ function App() {
       const data = {
         params,
         locks,
-        version: "1.0.0",
+        version: "1.1.0",
         timestamp: new Date().toISOString()
       };
       const json = JSON.stringify(data, null, 2);
@@ -89,8 +99,10 @@ function App() {
       try {
         const data = JSON.parse(event.target.result);
         if (data && data.params && data.locks) {
-          setParams(data.params);
-          setLocks(data.locks);
+          // Merge con defaults: sesiones antiguas no traen los parámetros nuevos
+          // (gap, w_polo, rho_t, t_gong, B_sat…) y no deben romper el cálculo.
+          setParams({ ...DEFAULT_PARAMS, ...data.params });
+          setLocks({ ...DEFAULT_LOCKS, ...data.locks });
           e.target.value = ''; // Permite volver a cargar el mismo archivo si es necesario
         } else {
           alert("El archivo seleccionado no es una sesión válida de Coil Designer.");
@@ -103,7 +115,7 @@ function App() {
   };
 
   const toggleLock = (name) => setLocks((prev) => ({ ...prev, [name]: !prev[name] }));
-  const runOptimizer = () => setOptimizer(optimizeFMM(params, locks));
+  const runOptimizer = () => setOptimizer(optimizeForce(params, locks));
   const applyOption = (cfg) => setParams((prev) => ({ ...prev, ...cfg }));
 
   const results = useMemo(() => calculateCoil(params), [params]);
@@ -153,9 +165,10 @@ function App() {
         <div className="principle-banner">
           <Zap size={18} className="principle-icon" />
           <div>
-            <strong>La fuerza (FMM) la limitan la potencia y el cobre, no el nº de vueltas.</strong>{' '}
-            Con el carrete lleno, <em>FMM ∝ √P</em>: añadir vueltas no da más fuerza. El calibre solo fija la
-            impedancia a la que trabaja el ampli; la <em>resonancia serie</em> multiplica la corriente por Q.
+            <strong>La fuerza sobre el bronce es F ≈ (B_gap²·Ac/4μ₀)·K(f) — y con seno puro el gong vibra a 2·f.</strong>{' '}
+            La FMM la limitan la potencia y el cobre (<em>FMM ∝ √P</em>, no el nº de vueltas); B = μ₀μ_eff·FMM/lc
+            hasta la <em>saturación del núcleo</em>; y el acoplamiento por Foucault <em>K(f)</em> mejora al subir
+            la frecuencia. La <em>resonancia serie</em> multiplica la corriente por Q.
           </div>
         </div>
 
@@ -171,18 +184,40 @@ function App() {
             </span>
           </div>
 
+          <div className="glass-panel metric-card" style={{ borderColor: 'var(--accent-cyan)' }}>
+            <span className="metric-label" style={{ color: 'var(--accent-cyan)' }}>
+              <Waves size={13} className="ic" /> Fuerza sobre el gong
+            </span>
+            <span className="metric-value" style={{ color: 'var(--accent-cyan)', fontSize: '1.55rem' }}>{fmtForce(results.F_ac)}</span>
+            <span className="metric-sub">vibra a 2f = {Math.round(results.f_mech)} Hz · K Foucault {(results.K_eddy * 100).toFixed(0)}%</span>
+          </div>
+
           <div className="glass-panel metric-card" style={{ borderColor: 'var(--accent-yellow)' }}>
             <span className="metric-label" style={{ color: 'var(--accent-yellow)' }}>
               <Zap size={13} className="ic" /> FMM {params.usar_transformador ? (res ? '(T1+res)' : '(con T1)') : res ? '(resonancia)' : '(directa)'}
             </span>
             <span className="metric-value" style={{ color: 'var(--accent-yellow)' }}>{results.FMM_op.toFixed(0)}</span>
-            <span className="metric-sub">A·vuelta de empuje sobre el gong</span>
+            <span className="metric-sub">A·vuelta (pico) — la fuerza va como FMM²</span>
+          </div>
+
+          <div className={`glass-panel metric-card ${results.sat_ok ? '' : 'warning'}`}>
+            <span className="metric-label"><Magnet size={13} className="ic" /> B núcleo / saturación</span>
+            <span className="metric-value" style={{ color: results.sat_ok ? 'var(--text-main)' : 'var(--accent-pink)' }}>
+              {(results.B_core_pk * 1000).toFixed(0)}<small>mT</small>
+            </span>
+            <span className="metric-sub">
+              {results.sat_ok
+                ? `${results.sat_pct.toFixed(0)}% de B_sat (${(params.B_sat * 1000).toFixed(0)} mT)`
+                : <span style={{ color: 'var(--accent-pink)' }}>¡SATURA! {results.sat_pct.toFixed(0)}% de B_sat</span>}
+            </span>
           </div>
 
           <div className="glass-panel metric-card" style={{ borderColor: 'var(--accent-pink)' }}>
             <span className="metric-label" style={{ color: 'var(--accent-pink)' }}><Power size={13} className="ic" /> Potencia (calor)</span>
             <span className="metric-value" style={{ color: 'var(--accent-pink)' }}>{results.P.toFixed(2)}<small>W</small></span>
-            <span className="metric-sub">prom. sinusoidal ≈ {results.P_avg.toFixed(2)} W</span>
+            <span className="metric-sub">
+              prom. ≈ {results.P_avg.toFixed(2)} W · ΔT ≈ {isFinite(results.deltaT_est) ? results.deltaT_est.toFixed(0) : '∞'} °C (aire quieto)
+            </span>
           </div>
 
           <div className={`glass-panel metric-card ${results.current_ok ? '' : 'warning'}`}>
@@ -198,7 +233,7 @@ function App() {
           <div className={`glass-panel metric-card ${res ? '' : 'dim'}`} style={{ borderColor: res ? 'var(--accent-cyan)' : 'var(--panel-border)' }}>
             <span className="metric-label" style={{ color: res ? 'var(--accent-cyan)' : 'var(--text-muted)' }}><Radio size={13} className="ic" /> Resonancia · Q</span>
             <span className="metric-value" style={{ color: res ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>{res ? results.Q.toFixed(0) : '—'}</span>
-            <span className="metric-sub">{res ? `C = ${results.C_res_uF.toFixed(3)} µF · ×${results.mult.toFixed(0)} corriente` : 'desactivada'}</span>
+            <span className="metric-sub">{res ? `C = ${results.C_res_uF.toFixed(3)} µF · V_C ≈ ${results.V_C_pk.toFixed(0)} V pico` : 'desactivada'}</span>
           </div>
 
           <div className={`glass-panel metric-card ${results.overflow ? 'warning' : ''}`}>
@@ -217,6 +252,9 @@ function App() {
         {params.usar_transformador && (
           <TransformerPanel params={params} results={results} transformerData={transformerData} />
         )}
+
+        {/* Plano técnico en vivo (isométrico + cadena eléctrica) */}
+        <DiagramPanel params={params} results={results} />
 
         <DashboardCharts
           impedanceData={impedanceData}

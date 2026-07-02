@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { X, Sparkles, Zap, CheckCircle2, ThumbsUp, ThumbsDown, ArrowRight } from 'lucide-react';
+import { fmtForce } from '../engine/coilMath';
 
 const TOPO_COLOR = {
   'Resonancia + Transformador': '#a855f7',
@@ -33,7 +34,7 @@ export default function OptimizerModal({ data, onApply, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="glass-panel optim-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}><X size={24} /></button>
-        <h2 className="modal-title"><Sparkles color="var(--accent-yellow)" /> Cálculo automático · máxima FMM</h2>
+        <h2 className="modal-title"><Sparkles color="var(--accent-yellow)" /> Cálculo automático · máxima fuerza sobre el gong</h2>
 
         <div className="optim-criteria">
           <div><strong>Objetivo:</strong> {criteria.objetivo}</div>
@@ -50,7 +51,7 @@ export default function OptimizerModal({ data, onApply, onClose }) {
           </div>
         ) : (
           <>
-            <div className="optim-sub">{options.length} opciones, ordenadas por FMM descendente. Haz clic para adoptar sus valores.</div>
+            <div className="optim-sub">{options.length} opciones, ordenadas por fuerza sobre el gong descendente. Haz clic para adoptar sus valores.</div>
             <div className="optim-list">
               {options.map((o) => {
                 const open = openRank === o.rank;
@@ -59,11 +60,11 @@ export default function OptimizerModal({ data, onApply, onClose }) {
                   <div key={o.rank} className={`optim-item ${open ? 'open' : ''} ${applied ? 'applied' : ''}`}>
                     <button className="optim-row" onClick={() => choose(o)}>
                       <span className="optim-rank">#{o.rank}</span>
-                      <span className="optim-fmm"><Zap size={13} /> {o.fmm.toFixed(0)}<small>A·v</small></span>
+                      <span className="optim-fmm"><Zap size={13} /> {fmtForce(o.force)}</span>
                       <span className="optim-topo" style={{ color: TOPO_COLOR[o.topo] }}>{o.topo}</span>
                       <span className="optim-specs">
-                        AWG {o.awg} · R {o.Rtarget}Ω · N {o.N}
-                        {o.tx ? ` · η ${o.eta.toFixed(0)}%` : ''}{o.res ? ` · Q ${o.Q.toFixed(0)}` : ''} · llenado {o.fill.toFixed(0)}%
+                        FMM {o.fmm.toFixed(0)} · AWG {o.awg} · R {o.Rtarget}Ω · N {o.N}
+                        {o.tx ? ` · η ${o.eta.toFixed(0)}%` : ''}{o.res ? ` · Q ${o.Q.toFixed(0)}` : ''} · B {o.sat_pct.toFixed(0)}% · llenado {o.fill.toFixed(0)}%
                       </span>
                       {applied
                         ? <span className="optim-applied"><CheckCircle2 size={14} /> aplicada</span>

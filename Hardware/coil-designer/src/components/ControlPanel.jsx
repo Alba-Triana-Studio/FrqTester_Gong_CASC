@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { SlidersHorizontal, Magnet, CircuitBoard, Radio, Wand2, Lock, LockOpen, Sparkles } from 'lucide-react';
+import { SlidersHorizontal, Magnet, CircuitBoard, Radio, Wand2, Lock, LockOpen, Sparkles, Waves } from 'lucide-react';
+import { snapToCommercial, cToSliderVal, sliderValToC } from '../engine/coilMath';
 
 function LockBtn({ locked, onLock }) {
   if (!onLock) return null;
@@ -66,6 +67,13 @@ export default function ControlPanel({ params, setParams, results, recommendedAW
   const [prevVmax, setPrevVmax] = useState(params.Vmax);
   const [vmaxInput, setVmaxInput] = useState(params.Vmax.toString());
   const [vrmsInput, setVrmsInput] = useState((params.Vmax / Math.SQRT2).toFixed(2));
+
+  const handleCapacitorSliderChange = (e) => {
+    const sVal = parseInt(e.target.value);
+    const rawC = sliderValToC(sVal);
+    const finalC = params.filtrar_comerciales ? snapToCommercial(rawC) : rawC;
+    setParams((prev) => ({ ...prev, C_manual_uF: finalC }));
+  };
 
   // Sync state if changed from outside (e.g. optimizer or preset)
   if (params.Vmax !== prevVmax) {
@@ -139,9 +147,9 @@ export default function ControlPanel({ params, setParams, results, recommendedAW
         hint={`La construyes tú (define las vueltas). En resonancia es lo que ve el ampli → apúntala a Zamp (${params.Zamp}Ω).`}
       />
       <Slider {...lk('f')}
-        label="Frecuencia de operación (f)" name="f" min={20} max={5000} step={5}
+        label="Frecuencia eléctrica de operación (f)" name="f" min={20} max={5000} step={5}
         value={params.f} unit="Hz" onChange={handleNumber}
-        hint="Rango típico de trabajo 100–2000 Hz."
+        hint={`Con seno puro la fuerza va como B² → el gong se excita a 2f = ${Math.round(params.f * 2)} Hz. Rango típico 100–2000 Hz.`}
       />
 
       <hr className="divider" />
@@ -162,6 +170,54 @@ export default function ControlPanel({ params, setParams, results, recommendedAW
         value={params.lc} unit="mm" onChange={handleNumber}
         hint="Incluye el entrehierro de aire."
       />
+      <NumberField
+        label="Saturación del núcleo (B_sat)" name="B_sat" min={0.05} max={2} step={0.05}
+        value={params.B_sat} unit="T" onChange={handleNumber}
+        hint={`Ferrita ≈ 0.3–0.4 T · acero laminado ≈ 1.2–1.6 T. Ahora: B = ${(results.B_core_pk * 1000).toFixed(0)} mT (${results.sat_pct.toFixed(0)}%${results.sat_ok ? '' : ' ⚠ SATURA'})`}
+      />
+
+      <hr className="divider" />
+      <h2 className="panel-section-title"><Waves size={18} /> Acoplamiento al Gong (Foucault)</h2>
+
+      <Slider {...lk('gap')}
+        label="Entrehierro bobina–gong (gap)" name="gap" min={1} max={20} step={0.5}
+        value={params.gap} unit="mm" onChange={handleNumber}
+        hint={`El campo decae e^(−π·gap/w) = ×${results.decay_gap.toFixed(2)}. Deja holgura para la excursión del gong.`}
+      />
+      <Slider {...lk('w_polo')}
+        label="Paso polar del núcleo E (w)" name="w_polo" min={10} max={80} step={1}
+        value={params.w_polo} unit="mm" onChange={handleNumber}
+        hint="Distancia del polo central a cada pierna lateral: fija el alcance del campo en el aire."
+      />
+      <Slider
+        label="Espesor del bronce frente al polo" name="t_gong" min={0.5} max={10} step={0.5}
+        value={params.t_gong} unit="mm" onChange={handleNumber}
+        hint={`δ piel en bronce a ${params.f} Hz = ${results.delta_t_mm.toFixed(1)} mm · acoplamiento K = ${(results.K_eddy * 100).toFixed(1)}%`}
+      />
+      <NumberField
+        label="Resistividad del bronce (ρ_t)" name="rho_t" min={10} max={1000} step={10}
+        value={params.rho_t} unit="nΩ·m" onChange={handleNumber}
+        hint="Bronce de campana (Cu-Sn20) ≈ 190–260 · latón ≈ 65 · cobre 17.2"
+      />
+
+      <div className="input-hint" style={{ marginTop: 4 }}>
+        <strong>Medición opcional con LCR</strong> (a la f de trabajo): R de la bobina sin gong y
+        con el gong a distancia de trabajo. ΔR = potencia real que absorbe el bronce.
+      </div>
+      <NumberField
+        label="R medida sin gong" name="R_lcr_0" min={0} max={1000} step={0.01}
+        value={params.R_lcr_0} unit="Ω" onChange={handleNumber}
+      />
+      <NumberField
+        label="R medida con gong" name="R_lcr_g" min={0} max={1000} step={0.01}
+        value={params.R_lcr_g} unit="Ω" onChange={handleNumber}
+      />
+      {results.lcr_active && (
+        <div className="match-note good">
+          ΔR = <strong>{results.R_ref.toFixed(2)} Ω</strong> → potencia que entra al gong ≈{' '}
+          <strong>{results.P_gong.toFixed(2)} W</strong> ({results.eta_gong.toFixed(0)}% de la potencia de la bobina).
+        </div>
+      )}
 
       <hr className="divider" />
       <h2 className="panel-section-title"><CircuitBoard size={18} /> Geometría del Alambre / Carrete</h2>
@@ -214,6 +270,73 @@ export default function ControlPanel({ params, setParams, results, recommendedAW
           ? `C = ${results.C_res_uF.toFixed(3)} µF · Q = ${results.Q.toFixed(0)} · ×${results.mult.toFixed(0)} corriente`
           : 'Cancela X_L: el ampli pasa a ver solo R y la corriente se multiplica por Q.'}
       />
+
+      {params.usar_resonancia && (
+        <div className="cap-controls" style={{ marginBottom: '8px' }}>
+          <div className="seg">
+            <button
+              type="button"
+              className={params.modo_capacitor !== 'manual' ? 'on' : ''}
+              onClick={() => set({ modo_capacitor: 'auto' })}
+            >
+              Auto
+            </button>
+            <button
+              type="button"
+              className={params.modo_capacitor === 'manual' ? 'on' : ''}
+              onClick={() => set({ modo_capacitor: 'manual' })}
+            >
+              Manual
+            </button>
+          </div>
+          {params.modo_capacitor === 'manual' ? (
+            <>
+              <div className="input-group">
+                <div className="label-row">
+                  <label>Capacitancia manual (C_manual)</label>
+                </div>
+                <div className="input-value">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1000}
+                    step={1}
+                    value={cToSliderVal(params.C_manual_uF)}
+                    onChange={handleCapacitorSliderChange}
+                    style={{ flex: 1, marginRight: '16px' }}
+                  />
+                  <span className="val">{params.C_manual_uF >= 1 ? params.C_manual_uF.toFixed(2) : params.C_manual_uF.toFixed(4)} µF</span>
+                </div>
+                <div className="input-hint">
+                  Óptimo automático: <strong style={{ color: 'var(--accent-cyan)' }}>{results.C_res_opt_uF.toFixed(3)} µF</strong>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '-4px', marginBottom: '4px', paddingLeft: '2px' }}>
+                <input
+                  type="checkbox"
+                  id="filtrar_comerciales"
+                  checked={params.filtrar_comerciales || false}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setParams((prev) => {
+                      const nextVal = checked ? snapToCommercial(prev.C_manual_uF) : prev.C_manual_uF;
+                      return { ...prev, filtrar_comerciales: checked, C_manual_uF: nextVal };
+                    });
+                  }}
+                  style={{ accentColor: 'var(--accent-cyan)', cursor: 'pointer', width: '15px', height: '15px' }}
+                />
+                <label htmlFor="filtrar_comerciales" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', cursor: 'pointer', fontWeight: 600 }}>
+                  Solo valores comerciales (E12)
+                </label>
+              </div>
+            </>
+          ) : (
+            <div className="input-hint" style={{ paddingLeft: 2 }}>
+              Capacitor óptimo: <strong style={{ color: 'var(--accent-cyan)' }}>{results.C_res_opt_uF.toFixed(3)} µF</strong> (cancela X_L a {params.f} Hz)
+            </div>
+          )}
+        </div>
+      )}
       <Toggle {...lk('usar_transformador')}
         label="Adaptación con transformador" name="usar_transformador"
         checked={params.usar_transformador} onChange={handleToggle}
@@ -259,7 +382,7 @@ export default function ControlPanel({ params, setParams, results, recommendedAW
 
       <hr className="divider" />
       <button type="button" className="optimize-btn" onClick={onOptimize}>
-        <Sparkles size={16} /> Cálculo automático · máx FMM
+        <Sparkles size={16} /> Cálculo automático · máx fuerza al gong
       </button>
       <div className="input-hint" style={{ textAlign: 'center' }}>
         Busca las mejores bobinas variando lo desbloqueado. Usa el 🔒 para fijar lo que no quieras que cambie.

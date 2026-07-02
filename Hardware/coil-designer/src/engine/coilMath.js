@@ -2,16 +2,21 @@
 //  coilMath.js — Motor de cálculo del Coil Designer
 //  Excitación acústica por inducción sobre gong de bronce (núcleo en 'E').
 //
-//  PRINCIPIO RECTOR:
-//  La FMM la limitan la POTENCIA disipable y el VOLUMEN DE COBRE, no el nº de
-//  vueltas por sí solo:   FMM = √(P · V_cobre / ρ) / l_vuelta.
-//  A volumen de cobre fijo (carrete lleno) R ∝ N², así que FMM ∝ √P y subir N
-//  no aporta nada. El nº de vueltas solo fija la IMPEDANCIA a la que el
-//  amplificador ve la carga; la resonancia serie cancela X_L y multiplica la
-//  corriente por Q = X_L/R.
+//  PRINCIPIO RECTOR (dos leyes encadenadas):
+//  1) FMM: la limitan la POTENCIA disipable y el VOLUMEN DE COBRE, no el nº de
+//     vueltas:  FMM = √(P · V_cobre / ρ) / l_vuelta.  (a cobre fijo R ∝ N²,
+//     así que FMM ∝ √P y subir N no aporta; N solo fija la impedancia).
+//  2) FUERZA sobre el bronce (no magnético → Ley de Lenz / Foucault):
+//         F(t) ≈ [B_gap(t)² · Ac / 2μ₀] · K(f)          (presión de Maxwell)
+//     con  B_gap = μ₀·μ_eff·FMM/lc · e^(−π·gap/w)   (decaimiento en el aire)
+//     y    K(f) = S²/(1+S²),  S = ω·μ₀·t_eff·w/(2π·ρ_bronce)
+//     (apantallamiento de lámina delgada: el bronce acopla mejor a mayor f).
+//     Con seno puro a f la fuerza tiene media + oscilación a 2f:
+//     ⚠ EL GONG SE EXCITA A 2·f_eléctrica.
 //
-//  Todo el cálculo interno se hace en SI (m, Ω, H, F, A) y se convierte solo
-//  para mostrar.
+//  Todo el cálculo interno se hace en SI (m, Ω, H, F, A, T, N) y se convierte
+//  solo para mostrar. Los modelos de acoplamiento son de primer orden:
+//  calíbralos con el LCR y con el banco de pruebas.
 // ============================================================================
 
 // ----- Constantes físicas -----
@@ -24,6 +29,28 @@ export const ENAMEL_FACTOR = 1.09;        // d_exterior ≈ d_cobre * 1.09 (esma
 // ventilación). Define la "corriente máxima" recomendada de cada calibre.
 // Sube este valor para uso intermitente / música (la excitación del gong lo es).
 export const J_SAFE = 4.0;                // [A_rms / mm²]
+
+// Convección natural para la estimación de ΔT de la bobina [W/(m²·K)]
+export const H_CONV = 15;
+
+// ----- Parámetros del acoplamiento al gong (valores por defecto editables) -----
+//  gap    : entrehierro bobina→bronce [mm]
+//  w_polo : paso polar del núcleo E (centro → pierna lateral) [mm]
+//  rho_t  : resistividad del bronce [nΩ·m]  (campana Cu-Sn20 ≈ 190–260)
+//  t_gong : espesor del bronce frente al polo [mm]
+//  B_sat  : saturación del núcleo [T] (ferrita ≈ 0.35, acero laminado ≈ 1.5)
+export const GONG_DEFAULTS = {
+  gap: 3, w_polo: 30, rho_t: 220, t_gong: 3, B_sat: 0.35,
+  R_lcr_0: 0, R_lcr_g: 0,
+};
+
+const gongParams = (p) => ({
+  gap_si: Math.max(p.gap ?? GONG_DEFAULTS.gap, 0) / 1e3,
+  w_si: Math.max(p.w_polo ?? GONG_DEFAULTS.w_polo, 1) / 1e3,
+  rho_t_si: Math.max(p.rho_t ?? GONG_DEFAULTS.rho_t, 1) * 1e-9,
+  t_si: Math.max(p.t_gong ?? GONG_DEFAULTS.t_gong, 0.1) / 1e3,
+  B_sat: Math.max(p.B_sat ?? GONG_DEFAULTS.B_sat, 0.01),
+});
 
 // ----- Tabla AWG (calibres 18–32) -----
 // Diámetro del cobre desnudo por la fórmula estándar:
@@ -65,6 +92,100 @@ export const AWG_TABLE = (() => {
 const safeDiv = (a, b) => (b && isFinite(b) ? a / b : 0);
 const clamp = (x, lo, hi) => Math.min(Math.max(x, lo), hi);
 
+// Formato legible de fuerzas (N → mN → µN)
+export const fmtForce = (F) => {
+  if (!isFinite(F)) return '—';
+  const a = Math.abs(F);
+  if (a >= 1) return `${F.toFixed(2)} N`;
+  if (a >= 1e-3) return `${(F * 1000).toFixed(a >= 0.1 ? 0 : 1)} mN`;
+  if (a >= 1e-6) return `${(F * 1e6).toFixed(0)} µN`;
+  return a === 0 ? '0' : `${F.toExponential(1)} N`;
+};
+
+// ============================================================================
+//  Efecto piel y proximidad
+// ============================================================================
+
+// Profundidad de piel δ = √(2ρ/(ω·μ₀)) [mm]
+export function skinDepthMm(rho, fHz) {
+  const w = 2 * Math.PI * Math.max(fHz, 0.001);
+  return Math.sqrt((2 * rho) / (w * MU_0)) * 1000;
+}
+
+// Factor de proximidad de Dowell: R_ac = F_R · R_dc para un bobinado de m capas.
+// Δ = (π/4)^¾ · (d/δ) · √(d/d_ext). Para Δ pequeño F_R→1; con alambre grueso y
+// muchas capas a f alta puede valer 2–3× (¡castiga los calibres gruesos!).
+export function dowellFactor(d_cu_mm, d_ext_mm, fHz, layers) {
+  const delta = skinDepthMm(RHO_CU, fHz);
+  if (!(delta > 0) || !(d_cu_mm > 0)) return 1;
+  const eta = d_ext_mm > 0 ? d_cu_mm / d_ext_mm : 1;   // porosidad de capa
+  const D = Math.pow(Math.PI / 4, 0.75) * (d_cu_mm / delta) * Math.sqrt(eta);
+  if (D < 0.05) return 1;
+  const m = Math.max(layers || 1, 1);
+  const term1 = D * (Math.sinh(2 * D) + Math.sin(2 * D)) / (Math.cosh(2 * D) - Math.cos(2 * D));
+  const term2 = D * (2 * (m * m - 1) / 3) * (Math.sinh(D) - Math.sin(D)) / (Math.cosh(D) + Math.cos(D));
+  return Math.max(term1 + term2, 1);
+}
+
+// ============================================================================
+//  Acoplamiento por corrientes de Foucault en el bronce (lámina delgada)
+//  δ_t: piel en el bronce. t_eff = min(espesor, δ_t).
+//  S = ω·μ₀·σ·t_eff·w/(2π): parámetro de apantallamiento con k = π/w.
+//  K = S²/(1+S²): fracción del empuje ideal (K→1 cuando el bronce "refleja").
+// ============================================================================
+export function eddyCoupling(fHz, g) {
+  const omega = 2 * Math.PI * Math.max(fHz, 0.001);
+  const delta_si = Math.sqrt((2 * g.rho_t_si) / (omega * MU_0));
+  const t_eff = Math.min(g.t_si, delta_si);
+  const S = (omega * MU_0 * t_eff * g.w_si) / (2 * Math.PI * g.rho_t_si);
+  const K = (S * S) / (1 + S * S);
+  return { delta_t_mm: delta_si * 1000, t_eff_mm: t_eff * 1000, S, K };
+}
+
+// --- Capacitores comerciales serie E12 ---
+const E12_BASES = [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
+export const COMMERCIAL_CAPACITORS = (() => {
+  const vals = [];
+  // Generar desde 0.001 uF hasta 10000 uF
+  for (let e = -3; e <= 4; e++) {
+    const mult = Math.pow(10, e);
+    for (const base of E12_BASES) {
+      vals.push(parseFloat((base * mult).toFixed(6)));
+    }
+  }
+  return vals.sort((a, b) => a - b);
+})();
+
+export function snapToCommercial(val) {
+  let closest = COMMERCIAL_CAPACITORS[0];
+  let minDiff = Math.abs(val - closest);
+  for (let i = 1; i < COMMERCIAL_CAPACITORS.length; i++) {
+    const diff = Math.abs(val - COMMERCIAL_CAPACITORS[i]);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = COMMERCIAL_CAPACITORS[i];
+    }
+  }
+  return closest;
+}
+
+// Mapeo logarítmico para el slider de capacitancia manual (0.001 uF a 10000 uF)
+const LOG_C_MIN = -3;
+const LOG_C_MAX = 4;
+
+export function cToSliderVal(cVal) {
+  const c = Math.max(cVal || 0.001, 0.001);
+  const logVal = Math.log10(c);
+  const pct = (logVal - LOG_C_MIN) / (LOG_C_MAX - LOG_C_MIN);
+  return Math.round(pct * 1000);
+}
+
+export function sliderValToC(sVal) {
+  const pct = clamp(sVal, 0, 1000) / 1000;
+  const logVal = LOG_C_MIN + pct * (LOG_C_MAX - LOG_C_MIN);
+  return parseFloat(Math.pow(10, logVal).toFixed(3));
+}
+
 // ============================================================================
 //  Transformador de adaptación T1
 //  Convención:  a = V_secundario / V_primario  (a>1 = elevador).
@@ -73,8 +194,8 @@ const clamp = (x, lo, hi) => Math.min(Math.max(x, lo), hi);
 //  acoplamiento k (0–1) que reduce la corriente útil del secundario; la parte no
 //  transferida se contabiliza como pérdida de T1 -> el balance energético cierra
 //  SIEMPRE:  P_amp = P_bobina + P_perdida_T1.
-//  coil: { R, N, X }  con X = reactancia neta de la bobina a esa frecuencia
-//  (X_L, o X_L − 1/ωC si la resonancia está activa).
+//  coil: { R, N, X }  con R = R_ac de la bobina y X = reactancia neta a esa
+//  frecuencia (X_L, o X_L − 1/ωC si la resonancia está activa).
 // ============================================================================
 export function transformerAt(p, coil, a) {
   const Vmax = p.Vmax;
@@ -121,7 +242,9 @@ export function calculateCoil(p) {
     awg, hw, dw, perim, Zamp,
     usar_resonancia, usar_transformador,
     modo_relacion, a_manual,
+    modo_capacitor, C_manual_uF,
   } = p;
+  const g = gongParams(p);
 
   // --- Conversión a SI ---
   const Ac_si = Math.max(Ac, 0) / 1e6;
@@ -145,39 +268,60 @@ export function calculateCoil(p) {
   const R_real = safeDiv(RHO_CU * l_total, A_wire);
   const R = Math.max(R_real, 1e-9);
 
+  // --- 3.8 Factor de llenado por capas (temprano: las capas afectan R_ac) ---
+  const turns_per_layer = d_ext_mm > 0 ? Math.floor(hw / d_ext_mm) : 0;
+  const layers_max      = d_ext_mm > 0 ? Math.floor(dw / d_ext_mm) : 0;
+  const num_layers      = turns_per_layer > 0 ? Math.ceil(N / turns_per_layer) : 0;
+  const depth_used_mm   = num_layers * d_ext_mm;
+  const N_max           = turns_per_layer * layers_max;
+  const fill_percent    = dw > 0 ? safeDiv(depth_used_mm, dw) * 100 : Infinity;
+  const fits            = N <= N_max && fill_percent <= 100;
+  const overflow        = !fits;
+
+  // --- 3.2b Resistencia AC: efecto piel + proximidad (Dowell) ---
+  const delta_cu_mm = skinDepthMm(RHO_CU, fHz);
+  const F_R = dowellFactor(d_cu_mm, d_ext_mm, fHz, num_layers);
+  const R_ac = R * F_R;
+
   // --- 3.3 Inductancia ---
   const L = safeDiv(MU_0 * mu_eff * N * N * Ac_si, lc_si);
 
-  // --- 3.4 Impedancia compleja en AC ---
+  // --- 3.4 Impedancia compleja en AC (con R_ac) ---
   const omega = 2 * Math.PI * fHz;
   const XL = omega * L;
-  const Z = Math.sqrt(R * R + XL * XL);
-  const phi_deg = Math.atan2(XL, R) * (180 / Math.PI);
+  const Z = Math.sqrt(R_ac * R_ac + XL * XL);
+  const phi_deg = Math.atan2(XL, R_ac) * (180 / Math.PI);
 
   // --- 3.5 Corriente de pico y FMM (SIN resonancia) ---
   const I_pico = safeDiv(Vmax, Z);
   const FMM = N * I_pico;
 
   // --- 3.5b Resonancia serie ---
-  const C_res = L > 0 ? safeDiv(1, omega * omega * L) : 0;
-  const I_res = safeDiv(Vmax, R);
+  const C_res_opt = L > 0 ? safeDiv(1, omega * omega * L) : 0;
+  const C_used = (modo_capacitor === 'manual')
+    ? (C_manual_uF ? C_manual_uF * 1e-6 : 0)
+    : C_res_opt;
+  const C_res = C_used;
+  const X_res_op = XL - (C_used > 0 ? 1 / (omega * C_used) : 0);
+  const Z_res_op = Math.sqrt(R_ac * R_ac + X_res_op * X_res_op);
+  const I_res = safeDiv(Vmax, Z_res_op);
   const FMM_res = N * I_res;
-  const Q = safeDiv(XL, R);
-  const mult = safeDiv(Z, R);
+  const Q = safeDiv(XL, R_ac);
+  const mult = safeDiv(Z, Z_res_op);
 
   // Reactancia NETA de la bobina en f_op: el capacitor cancela X_L si la
   // resonancia está activa (queda ≈ 0), si no, X = X_L.
-  const X_op = usar_resonancia ? (XL - (C_res > 0 ? 1 / (omega * C_res) : 0)) : XL;
-  const Zcoil_op = Math.sqrt(R * R + X_op * X_op); // = R con resonancia, = Z sin ella
+  const X_op = usar_resonancia ? X_res_op : XL;
+  const Zcoil_op = Math.sqrt(R_ac * R_ac + X_op * X_op); // = Z_res_op con resonancia, = Z sin ella
 
   // --- 3.7 Transformador de adaptación T1 ---
-  // Relación: auto = √(|Z_bobina(f_op)|/Zamp). Si hay resonancia, Z_bobina≈R en
-  // f_op, así que a sale mucho menor (importante recalcular según los toggles).
+  // Relación: auto = √(|Z_bobina(f_op)|/Zamp). Si hay resonancia, Z_bobina≈R_ac
+  // en f_op, así que a sale mucho menor (importante recalcular según los toggles).
   const a_auto = Zamp > 0 ? Math.sqrt(safeDiv(Zcoil_op, Zamp)) : 0;
   const a_used = usar_transformador
     ? (modo_relacion === 'manual' ? Math.max(a_manual || 1e-6, 1e-6) : a_auto)
     : a_auto;
-  const tx = transformerAt(p, { R, N, X: X_op }, a_used);
+  const tx = transformerAt(p, { R: R_ac, N, X: X_op }, a_used);
   tx.a_auto = a_auto;
   tx.mode = modo_relacion === 'manual' ? 'manual' : 'auto';
   // Relación de vueltas aproximada primario:secundario (a = N_sec/N_pri).
@@ -190,7 +334,7 @@ export function calculateCoil(p) {
   const I_direct = usar_resonancia ? I_res : I_pico;     // drive directo a la bobina
   const I_op   = usar_transformador ? tx.I_bobina : I_direct;  // corriente EN la bobina
   const FMM_op = N * I_op;                                // FMM real (la da I_bobina)
-  const Z_op   = usar_resonancia ? R : Z;                // carga de la bobina (sin T1)
+  const Z_op   = usar_resonancia ? R_ac : Z;             // carga de la bobina (sin T1)
   const Z_seen = usar_transformador ? tx.Zve : Z_op;     // lo que ve el amplificador
   const I_op_rms = I_op / Math.SQRT2;
 
@@ -199,12 +343,43 @@ export function calculateCoil(p) {
   const current_use_pct = i_safe_rms > 0 ? (I_op_rms / i_safe_rms) * 100 : Infinity;
 
   // --- 3.6 Potencia disipada en la bobina (calor que genera la FMM) ---
-  const P = I_op * I_op * R;                          // pico
-  const P_avg = P / 2;                               // promedio sinusoidal
+  const P = I_op * I_op * R_ac;                       // pico
+  const P_avg = P / 2;                                // promedio sinusoidal
 
   // --- Volumen de cobre y FMM teórica máxima a esta potencia (educativo) ---
   const V_cu = A_wire * l_total;
-  const FMM_limit = safeDiv(Math.sqrt(safeDiv(P * V_cu, RHO_CU)), lv_si);
+  const FMM_limit = safeDiv(Math.sqrt(safeDiv(P * V_cu, RHO_CU * F_R)), lv_si);
+
+  // --- Tensiones de resonancia: el capacitor ve Q·V (¡cientos de voltios!) ---
+  const X_C_op = C_used > 0 ? 1 / (omega * C_used) : 0;
+  const V_C_pk = usar_resonancia ? I_op * X_C_op : 0;
+  const V_L_pk = I_op * XL;
+
+  // --- Estimación térmica de la bobina (convección natural, aire quieto) ---
+  const A_surf = ((perim + Math.PI * dw) * hw) * 1e-6;   // superficie lateral [m²]
+  const deltaT_est = A_surf > 0 ? P_avg / (H_CONV * A_surf) : Infinity;
+
+  // --- ACOPLAMIENTO AL GONG: campo, saturación, Foucault y fuerza ---
+  const ed = eddyCoupling(fHz, g);
+  const B_core_pk = safeDiv(MU_0 * mu_eff * FMM_op, lc_si);   // B en el núcleo [T pico]
+  const sat_pct = (B_core_pk / g.B_sat) * 100;
+  const sat_ok = sat_pct <= 100;
+  const decay_gap = Math.exp(-Math.PI * g.gap_si / g.w_si);   // decaimiento del campo
+  const B_gap_pk = B_core_pk * decay_gap;                     // B en la cara del bronce
+  const F0 = (B_gap_pk * B_gap_pk * Ac_si) / (4 * MU_0);      // presión de Maxwell media ideal
+  const F_avg = F0 * ed.K;              // empuje medio [N]
+  const F_ac = F0 * ed.K;               // amplitud de la oscilación a 2f [N]
+  const F_pk = 2 * F0 * ed.K;           // fuerza pico [N]
+  const F_avg_gf = F_avg * 1000 / 9.80665;   // en gramos-fuerza (intuición)
+  const f_mech = 2 * fHz;               // ⚠ frecuencia MECÁNICA de excitación
+
+  // --- Medición opcional con LCR: ΔR = potencia que absorbe el gong ---
+  const R_lcr_0 = Math.max(p.R_lcr_0 || 0, 0);
+  const R_lcr_g = Math.max(p.R_lcr_g || 0, 0);
+  const lcr_active = R_lcr_0 > 0 && R_lcr_g > 0;
+  const R_ref = lcr_active ? Math.max(R_lcr_g - R_lcr_0, 0) : 0;
+  const P_gong = lcr_active ? I_op_rms * I_op_rms * R_ref : 0;
+  const eta_gong = lcr_active && R_lcr_g > 0 ? (R_ref / R_lcr_g) * 100 : 0;
 
   // --- Adaptación: la carga que ve el ampli (con o sin T1) frente a Zamp ---
   const Z_load = Z_op;
@@ -212,41 +387,68 @@ export function calculateCoil(p) {
   const Z_refl = tx.Z_refl_mag;
   const match = evaluateMatch(Z_seen, Zamp);
 
-  // --- Motor de consejos (cubre las 4 combinaciones de toggles) ---
-  const advice = buildAdvice(p, { R, Z, Zcoil_op, Zamp, Q, tx, a_auto, fHz, FMM_op });
-
-  // --- 3.8 Factor de llenado por capas ---
-  const turns_per_layer = d_ext_mm > 0 ? Math.floor(hw / d_ext_mm) : 0;
-  const layers_max      = d_ext_mm > 0 ? Math.floor(dw / d_ext_mm) : 0;
-  const num_layers      = turns_per_layer > 0 ? Math.ceil(N / turns_per_layer) : 0;
-  const depth_used_mm   = num_layers * d_ext_mm;
-  const N_max           = turns_per_layer * layers_max;
-  const fill_percent    = dw > 0 ? safeDiv(depth_used_mm, dw) * 100 : Infinity;
-  const fits            = N <= N_max && fill_percent <= 100;
-  const overflow        = !fits;
+  // --- Motor de consejos (saturación/térmica/V_C primero, luego topología) ---
+  const advice = buildAdvice(p, {
+    R: R_ac, Z, Zcoil_op, Zamp, Q, tx, a_auto, fHz, FMM_op,
+    sat_ok, sat_pct, B_core_pk, B_sat: g.B_sat, V_C_pk, deltaT_est, F_ac, f_mech,
+  });
 
   return {
     d_cu_mm, d_ext_mm, A_wire, A_wire_mm2, ohm_m, i_safe_rms, i_safe_pk,
     N_exact, N, l_total, R_real, R, V_cu,
+    delta_cu_mm, F_R, R_ac,
     L, L_mH: L * 1000, omega, XL, X_op, Zcoil_op, Z, phi_deg,
     I_pico, FMM,
-    C_res, C_res_uF: C_res * 1e6, C_res_nF: C_res * 1e9,
+    C_res, C_res_uF: C_res * 1e6, C_res_nF: C_res * 1e9, C_res_opt_uF: C_res_opt * 1e6,
     I_res, FMM_res, Q, mult,
     I_direct, I_op, FMM_op, Z_op, Z_seen, I_op_rms, current_ok, current_use_pct, FMM_limit,
     P, P_avg,
+    X_C_op, V_C_pk, V_L_pk,
+    A_surf_cm2: A_surf * 1e4, deltaT_est,
+    B_core_pk, sat_pct, sat_ok, decay_gap, B_gap_pk,
+    delta_t_mm: ed.delta_t_mm, t_eff_mm: ed.t_eff_mm, S_shield: ed.S, K_eddy: ed.K,
+    F0, F_avg, F_ac, F_pk, F_avg_gf, f_mech,
+    lcr_active, R_ref, P_gong, eta_gong,
     a_opt, Z_refl, Z_load, match, tx, advice,
     turns_per_layer, layers_max, num_layers, depth_used_mm, N_max,
     fill_percent, fits, overflow,
   };
 }
 
-// Motor de consejos: evalúa {transformador, resonancia} y la adaptación,
-// devolviendo el número concreto que motiva cada recomendación.
+// Motor de consejos: primero los límites físicos duros (saturación, térmica,
+// tensión del capacitor), después la topología {transformador, resonancia}.
 function buildAdvice(p, c) {
   const T = p.usar_transformador, Rz = p.usar_resonancia;
-  const { R, Z, Zamp, Q, tx, a_auto, fHz, FMM_op } = c;
+  const {
+    R, Z, Zcoil_op, Zamp, Q, tx, a_auto, fHz, FMM_op,
+    sat_ok, sat_pct, B_core_pk, B_sat, V_C_pk, deltaT_est,
+  } = c;
   const f0 = Math.round(fHz);
   const N = (label, value) => ({ label, value });
+
+  if (!sat_ok) {
+    return {
+      status: 'bad', title: 'Núcleo SATURADO — el modelo deja de valer',
+      detail: `B_núcleo = ${(B_core_pk * 1000).toFixed(0)} mT supera B_sat = ${(B_sat * 1000).toFixed(0)} mT (${sat_pct.toFixed(0)}%). Saturado: μ_eff colapsa, L cae, la resonancia se desafina y aparecen los armónicos duros que ya viste en el laboratorio. Opciones: baja la corriente/FMM, usa material con B_sat mayor (acero laminado ≈ 1.5 T), o gana fuerza con más área Ac en vez de más B.`,
+      numbers: [N('B núcleo', `${(B_core_pk * 1000).toFixed(0)} mT`), N('B_sat', `${(B_sat * 1000).toFixed(0)} mT`), N('uso', `${sat_pct.toFixed(0)}%`)],
+    };
+  }
+
+  if (isFinite(deltaT_est) && deltaT_est > 80) {
+    return {
+      status: 'bad', title: 'Sobrecalentamiento probable de la bobina',
+      detail: `ΔT estimada ≈ ${deltaT_est.toFixed(0)} °C en aire quieto (además del chequeo por densidad de corriente). Baja la potencia, usa alambre más grueso / carrete mayor, o añade ventilación y disipación al núcleo.`,
+      numbers: [N('ΔT est.', `${deltaT_est.toFixed(0)} °C`)],
+    };
+  }
+
+  if (Rz && V_C_pk > 600) {
+    return {
+      status: 'warn', title: 'Resonancia · tensión MUY alta en el capacitor',
+      detail: `El capacitor ve V_C ≈ ${V_C_pk.toFixed(0)} V pico (≈ Q·V). Necesitas film/MKP no polarizado con rating ≥ ${(V_C_pk * 1.5).toFixed(0)} V y cuidado con el aislamiento: esto ya es tensión peligrosa al tacto.`,
+      numbers: [N('V_C', `${V_C_pk.toFixed(0)} V pico`), N('Q', Q.toFixed(0))],
+    };
+  }
 
   if (!T && !Rz) {
     const m = Zamp > 0 ? Z / Zamp : 0;
@@ -265,19 +467,19 @@ function buildAdvice(p, c) {
   }
 
   if (Rz && !T) {
-    const m = Zamp > 0 ? R / Zamp : 0;
+    const m = Zamp > 0 ? Zcoil_op / Zamp : 0;
     if (m >= 0.5 && m <= 2) {
       return {
         status: 'ok', title: 'Resonancia · bien adaptado (banda estrecha)',
-        detail: `En ${f0} Hz la bobina cae a R = ${R.toFixed(1)} Ω ≈ Zamp. Ganancia de corriente Q = ${Q.toFixed(0)}. Fuera de esa frecuencia se desadapta.`,
-        numbers: [N('R', `${R.toFixed(1)} Ω`), N('Q', Q.toFixed(0)), N('desadaptación', `${m.toFixed(2)}×`)],
+        detail: `En ${f0} Hz la bobina tiene Z_res = ${Zcoil_op.toFixed(1)} Ω ≈ Zamp. Ganancia de corriente Q = ${Q.toFixed(0)}. Fuera de esa frecuencia se desadapta. El capacitor ve ${V_C_pk.toFixed(0)} V pico: usa film ≥ ${(V_C_pk * 1.5).toFixed(0)} V.`,
+        numbers: [N('Z_res', `${Zcoil_op.toFixed(1)} Ω`), N('Q', Q.toFixed(0)), N('V_C', `${V_C_pk.toFixed(0)} V`)],
       };
     }
-    const aSug = Zamp > 0 ? Math.sqrt(R / Zamp) : 0;
+    const aSug = Zamp > 0 ? Math.sqrt(Zcoil_op / Zamp) : 0;
     return {
       status: 'warn', title: 'Resonancia · módulo sin adaptar',
-      detail: `X_L cancelada, pero el módulo R = ${R.toFixed(1)} Ω ≠ Zamp = ${Zamp} Ω. Combínala con un transformador de relación a ≈ √(R/Zamp) = ${aSug.toFixed(2)}.`,
-      numbers: [N('R', `${R.toFixed(1)} Ω`), N('a sugerida', aSug.toFixed(2)), N('Q', Q.toFixed(0))],
+      detail: `X_L cancelada parcialmente, Z_res = ${Zcoil_op.toFixed(1)} Ω ≠ Zamp = ${Zamp} Ω. Combínala con un transformador de relación a ≈ √(Z_res/Zamp) = ${aSug.toFixed(2)}.`,
+      numbers: [N('Z_res', `${Zcoil_op.toFixed(1)} Ω`), N('a sugerida', aSug.toFixed(2)), N('Q', Q.toFixed(0))],
     };
   }
 
@@ -286,7 +488,7 @@ function buildAdvice(p, c) {
     if (reactive) {
       return {
         status: 'warn', title: 'Transformador sin resonancia · carga reactiva',
-        detail: `A ${f0} Hz la bobina es casi pura reactancia (Z = ${Z.toFixed(0)} Ω vs R = ${R.toFixed(1)} Ω). El transformador iguala el módulo, pero solo el ${tx.eta.toFixed(0)}% de la potencia llega a la bobina: el resto vuelve como reactiva o se pierde en R_pri. Activa la resonancia para cancelar X_L.`,
+        detail: `A ${f0} Hz la bobina es casi pura reactancia (Z = ${Z.toFixed(0)} Ω vs R_ac = ${R.toFixed(1)} Ω). El transformador iguala el módulo, pero solo el ${tx.eta.toFixed(0)}% de la potencia llega a la bobina: el resto vuelve como reactiva o se pierde en R_pri. Activa la resonancia para cancelar X_L.`,
         numbers: [N('η', `${tx.eta.toFixed(0)} %`), N('Z/R', `${(Z / R).toFixed(0)}×`), N('a', tx.a.toFixed(1))],
       };
     }
@@ -353,74 +555,76 @@ export function evaluateMatch(Zload, Zamp) {
 
 // ============================================================================
 //  Recomendación de calibre
-//  A Rtarget fijo, la corriente y la potencia son ~iguales para todo calibre
-//  (R manda). Más cobre (calibre más grueso) => más FMM, pero llena el carrete
-//  más rápido. Recomendación = el calibre MÁS GRUESO que aún quepa y aguante
-//  la corriente => máxima FMM viable.
+//  A Rtarget fijo, la corriente es ~igual para todo calibre (R manda), pero el
+//  calibre cambia el cobre total (FMM) y el efecto proximidad (R_ac a f).
+//  Recomendación = el calibre viable (cabe, no se quema, no satura) con MAYOR
+//  FMM real en la topología activa.
 // ============================================================================
 export function recommendAWG(params) {
   const rows = AWG_LIST.map((n) => {
     const c = calculateCoil({ ...params, awg: n });
-    return { awg: n, fits: c.fits, current_ok: c.current_ok, FMM: c.FMM_op, fill: c.fill_percent };
+    return { awg: n, fits: c.fits, current_ok: c.current_ok, sat_ok: c.sat_ok, FMM: c.FMM_op, fill: c.fill_percent };
   });
-  const viable = rows.filter((r) => r.fits && r.current_ok);
+  const viable = rows.filter((r) => r.fits && r.current_ok && r.sat_ok);
   if (viable.length) {
-    // el más grueso (menor nº AWG) viable => mayor FMM
-    const best = viable.reduce((a, b) => (b.awg < a.awg ? b : a));
-    return { awg: best.awg, ok: true, reason: 'Calibre más grueso que cabe y aguanta la corriente (máxima FMM).' };
+    // máxima FMM real (con proximidad incluida); a igualdad, el más grueso
+    const best = viable.reduce((a, b) => (b.FMM > a.FMM || (b.FMM === a.FMM && b.awg < a.awg) ? b : a));
+    return { awg: best.awg, ok: true, reason: 'Calibre viable (cabe, no se quema, no satura) con máxima FMM real.' };
   }
   // Sin opción ideal: prioriza que quepa, luego que aguante corriente.
   const fitting = rows.filter((r) => r.fits);
   if (fitting.length) {
     const best = fitting.reduce((a, b) => (b.awg < a.awg ? b : a));
-    return { awg: best.awg, ok: false, reason: 'Ninguno cumple todo; este cabe pero revisa la corriente.' };
+    return { awg: best.awg, ok: false, reason: 'Ninguno cumple todo; este cabe pero revisa corriente/saturación.' };
   }
   const thinnest = rows.reduce((a, b) => (b.awg > a.awg ? b : a));
   return { awg: thinnest.awg, ok: false, reason: 'Ni el más fino cabe: agranda el carrete o baja Rtarget.' };
 }
 
 // ============================================================================
-//  OPTIMIZADOR — máxima FMM dirigida al gong, usando un amplificador
+//  OPTIMIZADOR — máxima FUERZA sobre el gong, usando un amplificador
 //
-//  De la intersección de las ecuaciones, la FMM real se reduce a:
-//      FMM = √(P_bobina · V_cobre / ρ) / l_vuelta
-//  Solo importan: la potencia que llega a la bobina, el volumen de cobre y el
-//  perímetro de vuelta. Criterios derivados:
-//   1) Maximizar la potencia entregada -> adaptar la carga a Zamp (el ampli es
-//      el techo: no puede ver menos de Zamp sin recortar).
-//   2) Maximizar el cobre -> llenar el carrete (calibre grueso, más vueltas).
-//   3) Objetivo: FMM_op de la topología activa.
+//  Objetivo físico real (no la FMM a secas):
+//      F ≈ (B_gap² · Ac / 4μ₀) · K(f)
+//      B_gap = μ₀·μ_eff·FMM/lc · e^(−π·gap/w)   y   FMM = √(P·V_cu/ρ)/l_vuelta
+//  Por eso importan (y se exploran): potencia entregada, cobre, calibre,
+//  núcleo (μ_eff, Ac, lc, w), entrehierro y topología.
 //  Restricciones DURAS (una opción solo es válida si):
 //   - cabe (fill ≤ 100%) · no sobrecalienta (I ≤ I_segura) ·
-//   - no sobrecarga el ampli (Z_vista ≥ Zamp·0.9).
-//  Se busca por fuerza bruta sobre las variables DESBLOQUEADAS.
+//   - no sobrecarga el ampli (Z_vista ≥ Zamp·0.9) · no satura (B ≤ B_sat).
+//  Búsqueda: descenso por coordenadas desde 4 semillas (las combinaciones de
+//  resonancia/transformador), acumulando TODO lo evaluado y devolviendo las
+//  10 mejores opciones viables distintas.
 // ============================================================================
 export const OPTIM_CRITERIA = {
-  objetivo: 'Máxima FMM (empuje magnético sobre el gong) en la frecuencia de trabajo.',
-  ley: 'FMM = √(P_bobina · V_cobre / ρ) / l_vuelta — manda la potencia entregada y el cobre, no el nº de vueltas.',
+  objetivo: 'Máxima fuerza de repulsión (Lenz / Foucault) sobre el gong en la frecuencia de trabajo.',
+  ley: 'F ≈ (B_gap²·Ac/4μ₀)·K(f), con B_gap ∝ μ_eff·FMM/lc·e^(−π·gap/w) y FMM = √(P·V_cu/ρ)/l_vuelta. El gong vibra a 2·f.',
   restricciones: [
     'Cabe en el carrete (llenado ≤ 100%).',
     'El alambre no se sobrecalienta (corriente ≤ máx segura del calibre).',
     'El amplificador no se sobrecarga (impedancia vista ≥ su valor nominal).',
+    'El núcleo no se satura (B_núcleo ≤ B_sat).',
   ],
 };
 
 const OPTIM_LABELS = {
   Vmax: 'Vmax', Rtarget: 'Rtarget', f: 'f', mu_eff: 'μ_eff', Ac: 'Ac', lc: 'lc',
   awg: 'AWG', hw: 'hw', dw: 'dw', perim: 'perím', Zamp: 'Zamp',
+  gap: 'gap', w_polo: 'w_polo',
   usar_resonancia: 'resonancia', usar_transformador: 'transformador',
 };
 
-// Variables en orden de prioridad de búsqueda (alto impacto primero).
+// Variables que explora el optimizador (las gong/material —ρ_t, t, B_sat— son
+// datos del problema, no variables de diseño).
 const OPTIM_VARS = ['awg', 'Rtarget', 'usar_resonancia', 'usar_transformador',
-  'hw', 'dw', 'perim', 'Vmax', 'Zamp', 'mu_eff', 'Ac', 'lc', 'f'];
+  'gap', 'Ac', 'mu_eff', 'lc', 'w_polo', 'hw', 'dw', 'perim', 'Vmax', 'Zamp', 'f'];
 
 const uniqNum = (arr) => [...new Set(arr.filter((x) => x != null && isFinite(x)))];
 const candidatesFor = (k, v) => {
   switch (k) {
     case 'Vmax': return uniqNum([v, 4.24, 8, 12, 24]);
     case 'Rtarget': return uniqNum([v, 4, 6, 8, 12, 16, 24, 32]);
-    case 'f': return uniqNum([v, 250, 500, 1000, 2000]);
+    case 'f': return uniqNum([v, 150, 250, 500, 1000, 2000]);
     case 'mu_eff': return uniqNum([v, 5, 10, 20, 40]);
     case 'Ac': return uniqNum([v, 500, 1000, 2000, 4000]);
     case 'lc': return uniqNum([v, 50, 100, 200]);
@@ -429,6 +633,8 @@ const candidatesFor = (k, v) => {
     case 'dw': return uniqNum([v, 10, 15, 20, 30]);
     case 'perim': return uniqNum([v, 50, 80, 100, 150]);
     case 'Zamp': return uniqNum([v, 4, 8]);
+    case 'gap': return uniqNum([v, 2, 3, 5, 8]);
+    case 'w_polo': return uniqNum([v, 20, 30, 45, 60]);
     case 'usar_resonancia': return [true, false];
     case 'usar_transformador': return [true, false];
     default: return [v];
@@ -438,53 +644,64 @@ const candidatesFor = (k, v) => {
 const optChanged = (a, b) => (typeof a === 'boolean' ? a !== b : Math.abs(a - b) > 1e-6);
 const optFmt = (x) => (typeof x === 'boolean' ? (x ? 'ON' : 'OFF') : (Number.isInteger(x) ? `${x}` : x.toFixed(x < 10 ? 2 : 0)));
 
-export function optimizeFMM(params, locks = {}) {
-  const MAX_EVALS = 40000;
-  // 1) Rejillas por variable, respetando bloqueos y un presupuesto de evaluaciones.
-  const grids = {};
-  let product = 1;
-  for (const k of OPTIM_VARS) {
-    if (locks[k]) { grids[k] = [params[k]]; continue; }
-    let cand = candidatesFor(k, params[k]);
-    if (product * cand.length > MAX_EVALS) {
-      const allow = Math.max(1, Math.floor(MAX_EVALS / product));
-      cand = cand.slice(0, allow);
-      if (!cand.some((x) => !optChanged(x, params[k]))) cand[cand.length - 1] = params[k];
-    }
-    grids[k] = cand;
-    product *= cand.length;
-  }
+export function optimizeForce(params, locks = {}) {
+  const resOpts = locks.usar_resonancia ? [!!params.usar_resonancia] : [true, false];
+  const txOpts = locks.usar_transformador ? [!!params.usar_transformador] : [true, false];
 
-  // 2) Producto cartesiano + evaluación + filtrado de viabilidad.
-  const lens = OPTIM_VARS.map((k) => grids[k].length);
-  const total = lens.reduce((a, b) => a * b, 1);
-  const feasible = [];
-  for (let n = 0; n < total; n++) {
-    let rem = n;
-    const cfg = { ...params };
-    for (let i = 0; i < OPTIM_VARS.length; i++) {
-      const L = lens[i];
-      cfg[OPTIM_VARS[i]] = grids[OPTIM_VARS[i]][rem % L];
-      rem = Math.floor(rem / L);
-    }
-    if (cfg.usar_transformador) cfg.modo_relacion = 'auto';
+  const pool = new Map();   // firma de cfg -> evaluación (dedupe de trabajo)
+  const evalCfg = (cfg) => {
+    const key = OPTIM_VARS.map((k) => cfg[k]).join('|');
+    const hit = pool.get(key);
+    if (hit) return hit;
     const r = calculateCoil(cfg);
-    if (!r.fits || !r.current_ok) continue;            // cabe y no se sobrecalienta
-    if (r.Z_seen < cfg.Zamp * 0.9) continue;           // ampli no sobrecargado
-    if (!(r.FMM_op > 0) || !isFinite(r.FMM_op)) continue;
-    feasible.push({ cfg, fmm: r.FMM_op, r });
+    const violations =
+      (r.fits ? 0 : 1) + (r.current_ok ? 0 : 1) + (r.sat_ok ? 0 : 1) +
+      (r.Z_seen >= cfg.Zamp * 0.9 ? 0 : 1);
+    const feasible = violations === 0 && isFinite(r.F_ac) && r.F_ac > 0;
+    const o = { cfg, r, feasible, violations, force: r.F_ac };
+    pool.set(key, o);
+    return o;
+  };
+  // ¿a es mejor que b? Viable primero; entre inviables, el que menos viola
+  // (permite salir de un punto de partida inviable); luego mayor fuerza.
+  const better = (a, b) => {
+    if (a.feasible !== b.feasible) return a.feasible;
+    if (!a.feasible && a.violations !== b.violations) return a.violations < b.violations;
+    return a.force > b.force;
+  };
+
+  for (const rz of resOpts) {
+    for (const t of txOpts) {
+      let cur = evalCfg({
+        ...params,
+        usar_resonancia: rz, usar_transformador: t,
+        modo_relacion: 'auto', modo_capacitor: 'auto',
+      });
+      for (let pass = 0; pass < 3; pass++) {
+        let moved = false;
+        for (const k of OPTIM_VARS) {
+          if (k === 'usar_resonancia' || k === 'usar_transformador') continue;
+          if (locks[k]) continue;
+          for (const v of candidatesFor(k, cur.cfg[k])) {
+            if (!optChanged(v, cur.cfg[k])) continue;
+            const cand = evalCfg({ ...cur.cfg, [k]: v });
+            if (better(cand, cur)) { cur = cand; moved = true; }
+          }
+        }
+        if (!moved) break;
+      }
+    }
   }
 
-  // 3) Orden por FMM desc (a igual FMM, preferir más margen térmico y de bobinado)
-  //    + deduplicado por (calibre, topología, FMM): colapsa variantes de Rtarget/
-  //    geometría que dan la MISMA FMM, dejando opciones realmente distintas.
+  // Ranking global de TODO lo evaluado viable + dedupe de opciones gemelas.
+  const feasible = [...pool.values()].filter((o) => o.feasible);
   feasible.sort((a, b) =>
-    (b.fmm - a.fmm) || (a.r.current_use_pct - b.r.current_use_pct) || (a.r.fill_percent - b.r.fill_percent));
+    (b.force - a.force) || (a.r.current_use_pct - b.r.current_use_pct) || (a.r.fill_percent - b.r.fill_percent));
   const seen = new Set();
   const top = [];
   for (const o of feasible) {
     const c = o.cfg;
-    const sig = [c.awg, c.usar_resonancia ? 1 : 0, c.usar_transformador ? 1 : 0, Math.round(o.fmm)].join('|');
+    const sig = [c.awg, c.usar_resonancia ? 1 : 0, c.usar_transformador ? 1 : 0, o.force.toPrecision(2)].join('|');
     if (seen.has(sig)) continue;
     seen.add(sig);
     top.push(o);
@@ -505,12 +722,18 @@ function describeOption(o, rank, orig) {
   else good.push('montaje simple, sin capacitor ni transformador');
   if (r.fill_percent >= 75) good.push(`aprovecha el carrete (${r.fill_percent.toFixed(0)}% de cobre)`);
   if (r.current_use_pct < 50) good.push('amplio margen térmico');
+  if (r.sat_pct < 60) good.push(`núcleo lejos de saturar (B al ${r.sat_pct.toFixed(0)}%)`);
+  if (r.K_eddy > 0.3) good.push(`buen acoplamiento Foucault (K=${(r.K_eddy * 100).toFixed(0)}%)`);
   if (c.awg <= 22) good.push('alambre grueso y robusto');
 
   if (res) bad.push(`banda estrecha: solo cerca de ${Math.round(c.f)} Hz`);
   if (tx) bad.push(`pierde ${(100 - r.tx.eta).toFixed(0)}% en T1 y añade un transformador`);
   if (r.fill_percent > 92) bad.push('carrete casi lleno: bobinado difícil');
   if (r.current_use_pct > 80) bad.push(`corriente al ${r.current_use_pct.toFixed(0)}% del límite del alambre`);
+  if (r.sat_pct > 85) bad.push(`B al ${r.sat_pct.toFixed(0)}% de la saturación`);
+  if (r.K_eddy < 0.05) bad.push(`acoplamiento Foucault débil a ${Math.round(c.f)} Hz (K=${(r.K_eddy * 100).toFixed(1)}%)`);
+  if (res && r.V_C_pk > 300) bad.push(`capacitor a ${r.V_C_pk.toFixed(0)} V pico (film de alto voltaje)`);
+  if (r.F_R > 1.5) bad.push(`proximidad: R_ac = ${r.F_R.toFixed(1)}×R a esta f`);
   if (tx && r.tx.sat_risk) bad.push('riesgo de saturación de T1 a baja frecuencia');
   if (c.awg >= 30) bad.push('alambre muy fino y frágil');
 
@@ -520,9 +743,10 @@ function describeOption(o, rank, orig) {
   }
 
   return {
-    rank: rank + 1, cfg: c, fmm: o.fmm, topo, res, tx,
+    rank: rank + 1, cfg: c, force: o.force, fmm: r.FMM_op, topo, res, tx,
     awg: c.awg, Rtarget: c.Rtarget, eta: tx ? r.tx.eta : 100, Q: res ? r.Q : 0,
     fill: r.fill_percent, current_use: r.current_use_pct, N: r.N, l_total: r.l_total,
+    sat_pct: r.sat_pct, K_eddy: r.K_eddy,
     good, bad, changes,
     description: `Buena para: ${good.join('; ')}. Sacrifica: ${bad.length ? bad.join('; ') : 'poco — opción equilibrada'}.`,
   };
@@ -556,9 +780,10 @@ function freqSweep(f) {
 }
 
 // Magnitudes dependientes de la frecuencia en un punto, para TODA topología.
+// Incluye R_ac(f) (Dowell), K(f) (Foucault) y la FUERZA por topología.
 // Cada gráfica toma de aquí solo las series pertinentes a los toggles activos.
 function bandRow(base, params, freq) {
-  const { L, R, C_res: C, N } = base;
+  const { L, R, C_res: C, N, d_cu_mm, d_ext_mm, num_layers } = base;
   const Vmax = params.Vmax;
   const a = base.tx.a;
   const R_pri = Math.max(params.R_pri || 0, 0);
@@ -566,13 +791,14 @@ function bandRow(base, params, freq) {
   const k = clamp(params.acoplamiento_k == null ? 1 : params.acoplamiento_k, 0, 1);
 
   const w = 2 * Math.PI * freq;
+  const Rw = R * dowellFactor(d_cu_mm, d_ext_mm, freq, num_layers); // R_ac(f)
   const XL = w * L;
   const XC = C > 0 ? 1 / (w * C) : 0;
-  const Xres = XL - XC;                                // con capacitor de resonancia
-  const Z_coil = Math.sqrt(R * R + XL * XL);            // bobina sola
-  const Z_cap = Math.sqrt(R * R + Xres * Xres);         // bobina + capacitor
+  const Xres = XL - XC;                                 // con capacitor de resonancia
+  const Z_coil = Math.sqrt(Rw * Rw + XL * XL);          // bobina sola
+  const Z_cap = Math.sqrt(Rw * Rw + Xres * Xres);       // bobina + capacitor
   const Xeff = params.usar_resonancia ? Xres : XL;      // reactancia que refleja T1
-  const Rs = R + R_sec;
+  const Rs = Rw + R_sec;
   const Zsec = Math.sqrt(Rs * Rs + Xeff * Xeff);
   const Re = R_pri + Rs / (a * a);
   const Im = Xeff / (a * a);
@@ -581,22 +807,37 @@ function bandRow(base, params, freq) {
   const I_bobina = safeDiv(k * I_amp, a);
   const I_direct = safeDiv(Vmax, Z_coil);
   const I_res = safeDiv(Vmax, Z_cap);
-  const P_bobina = I_bobina * I_bobina * R;
+  const P_bobina = I_bobina * I_bobina * Rw;
   const P_total = I_amp * I_amp * Re;
   const eta = P_total > 0 ? (P_bobina / P_total) * 100 : 0;
+
+  // Fuerza sobre el gong por topología: F = c_F · FMM² · K(f)
+  const g = gongParams(params);
+  const { K } = eddyCoupling(freq, g);
+  const Ac_si = Math.max(params.Ac, 0) / 1e6;
+  const lc_si = Math.max(params.lc, 1e-6) / 1e3;
+  const decay = Math.exp(-Math.PI * g.gap_si / g.w_si);
+  const cF = (MU_0 * params.mu_eff * params.mu_eff * decay * decay * Ac_si) / (4 * lc_si * lc_si);
+  const FMM_sin_raw = N * I_direct;
+  const FMM_res_raw = N * I_res;
+  const FMM_tx_raw = N * I_bobina;
 
   return {
     f: Math.round(freq),
     Z_coil: +Z_coil.toFixed(2), Z_cap: +Z_cap.toFixed(2), Z_tx: +Z_amp_ve.toFixed(2),
     I_direct: +I_direct.toFixed(4), I_res: +I_res.toFixed(4),
     I_bobina: +I_bobina.toFixed(4), I_amp: +I_amp.toFixed(4),
-    FMM_sin: +(N * I_direct).toFixed(1), FMM_res: +(N * I_res).toFixed(1), FMM_tx: +(N * I_bobina).toFixed(1),
+    FMM_sin: +FMM_sin_raw.toFixed(1), FMM_res: +FMM_res_raw.toFixed(1), FMM_tx: +FMM_tx_raw.toFixed(1),
+    F_sin: cF * FMM_sin_raw * FMM_sin_raw * K,
+    F_res: cF * FMM_res_raw * FMM_res_raw * K,
+    F_tx: cF * FMM_tx_raw * FMM_tx_raw * K,
+    K_eddy: K,
     V_sec: +(I_bobina * Zsec).toFixed(3), eta: +eta.toFixed(1),
   };
 }
 
 // 1) Impedancia vs frecuencia (un solo eje, Ω):
-//    - Bobina sola (sube con f) · Con capacitor (cae a R en f0, si resonancia)
+//    - Bobina sola (sube con f) · Con capacitor (cae a R_ac en f0, si resonancia)
 //    - Con transformador (lo que ve el ampli a través de T1, si está activo)
 export function generateImpedanceCurve(params) {
   const base = calculateCoil(params);
@@ -620,8 +861,7 @@ export function generateCurrentCurve(params) {
 
 // 3) Selección de calibre (un solo eje, % de llenado del carrete):
 //    Para cada AWG al Rtarget actual: cuánto llena el carrete y si la corriente
-//    es segura. El color codifica la viabilidad. La recomendación = el más
-//    grueso que cabe.
+//    es segura. El color codifica la viabilidad. La recomendación = máxima FMM.
 export function generateAWGComparison(params) {
   return AWG_LIST.map((n) => {
     const c = calculateCoil({ ...params, awg: n });
@@ -639,15 +879,15 @@ export function generateAWGComparison(params) {
   });
 }
 
-// 4) Fuerza (FMM) vs Frecuencia (un solo eje, A·vuelta):
-//    FMM_sin (directo, baseline), FMM_res (resonancia directa) y FMM_tx (con T1).
-//    En el punto óptimo, T1 a igualdad de potencia NO da más FMM que el directo
-//    bien adaptado: solo redistribuye y estabiliza la carga.
+// 4) FUERZA sobre el gong vs frecuencia (un solo eje, N):
+//    F_sin (directo), F_res (resonancia directa) y F_tx (con T1).
+//    F ∝ FMM²·K(f): combina el pico de resonancia con el acoplamiento Foucault.
+//    Recuerda: la fuerza empuja al gong a 2·f (el eje x es la f eléctrica).
 export function generateForceCurve(params) {
   const base = calculateCoil(params);
   return freqSweep(params.f).map((freq) => {
     const r = bandRow(base, params, freq);
-    return { f: r.f, FMM_sin: r.FMM_sin, FMM_res: r.FMM_res, FMM_tx: r.FMM_tx };
+    return { f: r.f, F_sin: r.F_sin, F_res: r.F_res, F_tx: r.F_tx, K_eddy: r.K_eddy };
   });
 }
 

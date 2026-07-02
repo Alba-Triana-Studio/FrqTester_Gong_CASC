@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight, ChevronLeft, Sigma, Info } from 'lucide-react';
+import { fmtForce } from '../engine/coilMath';
 
 function Eq({ n, title, formula, steps, result, desc, accent }) {
   return (
@@ -18,12 +19,16 @@ function Eq({ n, title, formula, steps, result, desc, accent }) {
 export default function EquationPanel({ params, results }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const { Vmax, Rtarget, f, mu_eff, Ac, lc, awg, perim, hw, Zamp, usar_resonancia, usar_transformador } = params;
+  const { Vmax, Rtarget, f, mu_eff, Ac, lc, awg, perim, hw, Zamp, usar_resonancia, usar_transformador, modo_capacitor,
+    gap, w_polo, rho_t, t_gong, B_sat } = params;
   const {
     d_cu_mm, A_wire, ohm_m, N_exact, N, l_total, R_real,
+    delta_cu_mm, F_R, R_ac,
     L, L_mH, omega, XL, Z, Zcoil_op, phi_deg, I_pico, FMM,
-    C_res_uF, I_res, FMM_res, Q, mult, P, P_avg,
+    C_res_uF, C_res_opt_uF, I_res, FMM_res, Q, mult, P, P_avg, V_C_pk,
     Z_refl, tx, turns_per_layer, layers_max, num_layers, N_max, fill_percent,
+    B_core_pk, sat_pct, sat_ok, decay_gap, B_gap_pk,
+    delta_t_mm, t_eff_mm, S_shield, K_eddy, F_avg, F_ac, f_mech, FMM_op,
   } = results;
 
   const e = (x, d = 3) => (isFinite(x) ? x.toExponential(d) : '—');
@@ -59,6 +64,9 @@ export default function EquationPanel({ params, results }) {
             <li><b>lc</b> = {lc} mm — camino magnético (incl. entrehierro)</li>
             <li><b>l_vuelta</b> = {perim} mm — perímetro medio de una espira</li>
             <li><b>Vmax</b> = {Vmax} V pico (Vrms = {fx(Vmax / Math.SQRT2, 2)} V) · <b>f</b> = {f} Hz · <b>Zamp</b> = {Zamp} Ω</li>
+            <li><b>gap</b> = {gap} mm · <b>w</b> = {w_polo} mm — entrehierro y paso polar</li>
+            <li><b>ρ_t</b> = {rho_t} nΩ·m · <b>t</b> = {t_gong} mm — bronce del gong</li>
+            <li><b>B_sat</b> = {B_sat} T — saturación del núcleo</li>
           </ul>
         </details>
 
@@ -87,11 +95,11 @@ export default function EquationPanel({ params, results }) {
         />
 
         <Eq
-          n="3.4" title="Impedancia en AC (ω, X_L, Z, φ)"
-          formula={<>ω = 2πf · X_L = ωL · Z = √(R²+X_L²) · φ = atan2(X_L,R)</>}
-          steps={<>ω = {fx(omega, 0)} rad/s · X_L = {fx(XL, 1)} Ω</>}
+          n="3.4" title="Impedancia en AC (R_ac, X_L, Z, φ)"
+          formula={<>R_ac = F_R·R (Dowell) · X_L = ωL · Z = √(R_ac²+X_L²)</>}
+          steps={<>δ_Cu = {fx(delta_cu_mm, 2)} mm · F_R({num_layers} capas) = {fx(F_R, 2)} → R_ac = {fx(R_ac, 2)} Ω · X_L = {fx(XL, 1)} Ω</>}
           result={<>Z = <strong>{fx(Z, 1)} Ω</strong> · φ = {fx(phi_deg, 1)}°</>}
-          desc="A mayor f, X_L domina y la impedancia ahoga la corriente."
+          desc="El efecto piel/proximidad sube la R con la frecuencia (castiga alambre grueso multicapa). A mayor f, X_L domina y ahoga la corriente."
         />
 
         <Eq
@@ -104,12 +112,21 @@ export default function EquationPanel({ params, results }) {
         />
 
         <Eq
-          n="3.5b" title="Resonancia serie (C, Q, I_res)"
-          formula={<>C = 1/(ω²L) · I_res = Vmax/R · Q = X_L/R</>}
-          steps={<>C = 1/({fx(omega, 0)}²·{fx(L, 5)}) = {fx(C_res_uF, 3)} µF</>}
-          result={<>I_res = {fx(I_res, 3)} A · FMM_res = <strong>{fx(FMM_res, 1)}</strong> · Q = {fx(Q, 0)}</>}
+          n="3.5b" title={modo_capacitor === 'manual' ? "Resonancia serie manual (C, Q, Z_res, I_res)" : "Resonancia serie (C, Q, I_res)"}
+          formula={modo_capacitor === 'manual'
+            ? <>C_opt = 1/(ω²L) · Z_res = √(R² + (X_L - 1/(ωC))²) · I_res = Vmax/Z_res</>
+            : <>C = 1/(ω²L) · I_res = Vmax/R · Q = X_L/R</>
+          }
+          steps={modo_capacitor === 'manual'
+            ? <>C_opt = {fx(C_res_opt_uF, 3)} µF · C_usado = {fx(C_res_uF, 3)} µF · Z_res = {fx(Zcoil_op, 2)} Ω</>
+            : <>C = 1/({fx(omega, 0)}²·{fx(L, 5)}) = {fx(C_res_uF, 3)} µF</>
+          }
+          result={<>I_res = {fx(I_res, 3)} A · FMM_res = <strong>{fx(FMM_res, 1)}</strong> · Q = {fx(Q, 0)} · V_C ≈ <strong>{fx(V_C_pk, 0)} V pico</strong></>}
           accent="var(--accent-cyan)"
-          desc={<>La reactancia se cancela y Z colapsa a R. Multiplicador FMM_res/FMM = Z/R = <strong>×{fx(mult, 1)}</strong>.</>}
+          desc={modo_capacitor === 'manual'
+            ? <>Reactancia cancelada parcialmente por C manual. Multiplicador de corriente respecto a directa: Z/Z_res = <strong>×{fx(mult, 1)}</strong>. ⚠ El capacitor ve V_C = I·X_C: usa film/MKP no polarizado con rating ≥ {fx(V_C_pk * 1.5, 0)} V.</>
+            : <>La reactancia se cancela y Z colapsa a R_ac. Multiplicador FMM_res/FMM = Z/R_ac = <strong>×{fx(mult, 1)}</strong>. ⚠ El capacitor (y la bobina) ven ≈ Q·V = {fx(V_C_pk, 0)} V pico: film/MKP no polarizado con rating ≥ {fx(V_C_pk * 1.5, 0)} V.</>
+          }
         />
 
         <Eq
@@ -172,6 +189,50 @@ export default function EquationPanel({ params, results }) {
           steps={<>⌊{hw}/d_ext⌋ = {turns_per_layer} v/capa · {num_layers} capas · máx {layers_max} capas</>}
           result={<>N_max = <strong>{N_max}</strong> · llenado = {isFinite(fill_percent) ? fx(fill_percent, 1) : '∞'}%</>}
           desc="Empaquetado por capas con el diámetro esmaltado. >100 % no cabe físicamente."
+        />
+
+        <div className="principle-box" style={{ background: 'rgba(0,200,255,0.08)', borderColor: 'rgba(0,200,255,0.35)' }}>
+          <Info size={16} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
+          <div>
+            <strong>Del circuito a la física del gong:</strong> el bronce no es magnético — la fuerza nace de las
+            corrientes de Foucault que induce el flujo variable (Ley de Lenz) y es <em>siempre de repulsión</em>.
+            Como F ∝ B², con seno puro a f el empuje tiene una parte constante y una oscilación a <strong>2f</strong>.
+          </div>
+        </div>
+
+        <Eq
+          n="3.9" title="Campo en el núcleo y saturación"
+          formula={<>B = μ₀·μ_eff·FMM / lc</>}
+          steps={<>B = 4π×10⁻⁷·{mu_eff}·{fx(FMM_op, 0)} / {fx(lc / 1000, 3)}</>}
+          result={<><strong>{fx(B_core_pk * 1000, 0)} mT</strong> pico · {fx(sat_pct, 0)}% de B_sat ({fx(B_sat * 1000, 0)} mT) {sat_ok ? '✓' : '⚠ SATURA'}</>}
+          accent={sat_ok ? undefined : 'var(--accent-pink)'}
+          desc="Si B toca B_sat, μ_eff colapsa: cae L, se desafina la resonancia y aparecen armónicos duros. Con B limitado, la fuerza extra se gana con más Ac."
+        />
+
+        <Eq
+          n="3.10" title="Campo que llega al bronce (entrehierro)"
+          formula={<>B_gap = B·e^(−π·gap/w)</>}
+          steps={<>e^(−π·{gap}/{w_polo}) = ×{fx(decay_gap, 2)}</>}
+          result={<><strong>{fx(B_gap_pk * 1000, 1)} mT</strong> en la cara del gong</>}
+          desc="El campo de un núcleo E decae exponencialmente al alejarse: cada mm de entrehierro cuesta fuerza. w grande = campo de mayor alcance."
+        />
+
+        <Eq
+          n="3.11" title="Corrientes de Foucault en el bronce (K)"
+          formula={<>δ_t = √(2ρ_t/ωμ₀) · S = ωμ₀·t_eff·w/(2πρ_t) · K = S²/(1+S²)</>}
+          steps={<>δ_t = {fx(delta_t_mm, 1)} mm · t_eff = {fx(t_eff_mm, 1)} mm · S = {fx(S_shield, 2)}</>}
+          result={<>K = <strong>{fx(K_eddy * 100, 1)} %</strong> del empuje ideal</>}
+          accent="var(--accent-cyan)"
+          desc="El bronce reacciona mejor cuanto más rápido cambia el flujo (Lenz): K crece con f y satura en 1. Por eso el gong responde mejor arriba de ~100 Hz."
+        />
+
+        <Eq
+          n="3.12" title="Fuerza de repulsión sobre el gong"
+          formula={<>F_med = B_gap²·Ac·K/(4μ₀) · F(t) = F_med·(1−cos 2ωt)</>}
+          steps={<>F_med = ({fx(B_gap_pk * 1000, 1)} mT)²·{Ac} mm²·{fx(K_eddy, 3)}/(4μ₀)</>}
+          result={<><strong>{fmtForce(F_avg)}</strong> medio · oscila ±{fmtForce(F_ac)} a <strong>{Math.round(f_mech)} Hz</strong></>}
+          accent="var(--accent-cyan)"
+          desc="Presión de Maxwell × acoplamiento K. Modelo de primer orden: el orden de magnitud y las tendencias son fiables; calibra el valor absoluto en banco."
         />
 
         <div className="lcr-warning">

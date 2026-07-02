@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, ReferenceLine, ReferenceArea,
   BarChart, Bar, Cell, Label,
 } from 'recharts';
+import { fmtForce } from '../engine/coilMath';
 
 const tooltipStyle = {
   background: 'rgba(8,12,22,0.92)',
@@ -145,26 +146,27 @@ export default function DashboardCharts({
 
       {/* 4) Fuerza vs Frecuencia */}
       <div className="glass-panel chart-container">
-        <h3 className="chart-title">4 · ¿Cuánta fuerza (FMM) sobre el gong?</h3>
+        <h3 className="chart-title">4 · ¿Cuánta fuerza empuja al gong? <span className="chart-axis-tag">F ∝ FMM²·K(f)</span></h3>
         <div className="chart-body">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={forceData} margin={{ top: 8, right: 16, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
               {freqXAxis()}
-              <YAxis tick={axis} width={50} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => [`${v} A·vuelta`, n]} labelFormatter={(l) => `f = ${l} Hz`} />
+              <YAxis tick={axis} width={55} tickFormatter={(v) => (v >= 1 ? `${v.toFixed(1)}N` : `${(v * 1000).toFixed(v * 1000 >= 10 ? 0 : 1)}mN`)} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => [fmtForce(v), n]} labelFormatter={(l) => `f eléctrica = ${l} Hz → empuje a ${l * 2} Hz`} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <ReferenceLine x={params.f} stroke="rgba(255,255,255,0.3)" strokeDasharray="4 4"><Label {...opLabel} /></ReferenceLine>
-              <Line type="monotone" dataKey="FMM_sin" stroke="#64748b" strokeWidth={2} dot={false} name="Directo sin resonancia" />
-              {res && !tx && <Line type="monotone" dataKey="FMM_res" stroke="var(--accent-yellow)" strokeWidth={3} dot={false} name="Directo con resonancia" />}
-              {tx && <Line type="monotone" dataKey="FMM_tx" stroke={TX_COLOR} strokeWidth={3} dot={false} name={res ? 'Transformador + resonancia' : 'Con transformador'} />}
+              <Line type="monotone" dataKey="F_sin" stroke="#64748b" strokeWidth={2} dot={false} name="Directo sin resonancia" />
+              {res && !tx && <Line type="monotone" dataKey="F_res" stroke="var(--accent-yellow)" strokeWidth={3} dot={false} name="Directo con resonancia" />}
+              {tx && <Line type="monotone" dataKey="F_tx" stroke={TX_COLOR} strokeWidth={3} dot={false} name={res ? 'Transformador + resonancia' : 'Con transformador'} />}
             </LineChart>
           </ResponsiveContainer>
         </div>
         <div className="chart-note">
-          Fuerza magnética sobre el bronce. {res && <>La resonancia da el pico (×Q = {results.Q.toFixed(0)}). </>}
+          Presión de Maxwell × acoplamiento Foucault K(f) — <strong>el gong vibra a 2·f eléctrica</strong> ({params.f * 2} Hz
+          en el punto de operación) con K = {(results.K_eddy * 100).toFixed(0)}%. {res && <>La resonancia da el pico (F ∝ FMM², ×Q² = {(results.Q * results.Q).toFixed(0)}). </>}
           {tx
-            ? <>El transformador <strong>no inventa FMM</strong>: a igualdad de potencia coincide con el directo bien adaptado; su valor es estabilizar la carga.</>
+            ? <>El transformador <strong>no inventa fuerza</strong>: a igualdad de potencia coincide con el directo bien adaptado; su valor es estabilizar la carga.</>
             : <>El gris es la baseline directa.</>}
         </div>
       </div>
