@@ -63,10 +63,9 @@ export function buildSystemDiagramSvg(params, results, { theme = 'dark' } = {}) 
   const hwm = Math.max(params.hw, 8);
   const dwm = Math.max(params.dw, 3);
   const b = clampNum(depth_used_mm || 2, 1.6, dwm);           // build de cobre
-  // El polo debe sobresalir un poco MÁS que el build de cobre para verse en
-  // isométrico (la cara frontal de la bobina es b mm mayor que la pierna), pero
-  // solo lo justo: un saliente exagerado confundiría al fabricante.
-  const legLen = hwm + b;
+  // El polo sobresale solo 0.5 mm más que el build de cobre: apenas asoma para
+  // que se vea el núcleo, sin un saliente que confunda al fabricante.
+  const legLen = hwm + b + 0.5;
   const gapm = Math.max(params.gap ?? 3, 0.5);
   const tg = Math.max(params.t_gong ?? 3, 1.5);
   const Ht = 2 * c + 2 * dwm;                                 // alto total del E
