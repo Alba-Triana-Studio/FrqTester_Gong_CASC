@@ -103,6 +103,7 @@ flowchart LR
       B_core_pk, sat_pct, sat_ok, decay_gap, B_gap_pk,
       delta_t_mm, t_eff_mm, S_shield, K_eddy, F_avg, F_ac, F_pk, F_avg_gf, f_mech,
       lcr_active, R_ref, P_gong, eta_gong,
+      safety_issues, safety_ok,
       a_opt, Z_load, Z_seen, match, tx, I_op, I_op_rms, current_ok, current_use_pct,
       turns_per_layer, layers_max, num_layers, N_max, fill_percent, overflow,
     } = results;
@@ -142,10 +143,17 @@ flowchart LR
         } else {
           md += `*(No se pudo rasterizar el plano de T1 — ábrelo en la aplicación.)*\n\n`;
         }
+        if (tx.a_capped || tx.V_sec > 250) {
+          md += `> ⚠ **T1 NO FABRICABLE CON SEGURIDAD**: la adaptación pide a ≈ ${fx(tx.a_auto_raw, 1)} y V_sec ≈ ${fx(tx.V_sec, 0)} V pico. `;
+          md += `Activa la resonancia serie (el amplificador pasa a ver R_ac) antes de encargar T1. Estas especificaciones se listan solo como diagnóstico.\n\n`;
+        }
         md += `- **Relación a = V_sec/V_pri**: ${fx(tx.a, 2)} (${tx.a >= 1 ? 'elevador' : 'reductor'}) · vueltas pri:sec ≈ **${tx.turns_ratio}** · k = ${fx(tx.k, 2)}\n`;
+        md += `- **Calibre del alambre**: primario **${tx.awg_pri.ok ? `AWG ${tx.awg_pri.awg}` : `sección ≥ ${fx(tx.awg_pri.mm2, 1)} mm² (hilos en paralelo)`}** para ${fx(tx.I_amp_rms, 2)} A rms · secundario **${tx.awg_sec.ok ? `AWG ${tx.awg_sec.awg}` : `sección ≥ ${fx(tx.awg_sec.mm2, 1)} mm²`}** para ${fx(tx.I_bobina_rms, 2)} A rms (J = 4 A/mm²)\n`;
         md += `- **Devanados**: primario R_pri = ${fx(params.R_pri, 1)} Ω (al amplificador) · secundario R_sec = ${fx(params.R_sec, 2)} Ω (a ${usar_resonancia ? 'C y ' : ''}bobina)\n`;
         md += `- **Operación**: ${fx(Vmax, 2)} Vp → ${fx(tx.V_sec, 1)} Vp · ${fx(tx.I_amp, 2)} A pk → ${fx(tx.I_bobina, 2)} A pk · η = ${fx(tx.eta, 0)}%\n`;
-        md += `- **Núcleo**: acorazado (EI o toroidal de audio/línea) · potencia nominal ≥ **${fx(Math.max(tx.P_total, 5), 0)} W continuos** a ${f} Hz\n`;
+        md += `- **Núcleo**: acorazado (EI o toroidal de audio/línea) · potencia nominal ≥ **${tx.P_nom} W continuos** a ${f} Hz · pérdidas ≈ ${fx(tx.P_loss / 2, 1)} W (dimensiona la ventilación de T1 con esto)\n`;
+        md += `- **Vueltas por voltio** (al elegir núcleo): N/V = 1/(4.44·f·B_máx·Ae) con Ae en m² → N_pri = ${fx(Vmax / Math.SQRT2, 1)}·(N/V), N_sec = ${fx(tx.a, 2)}·N_pri\n`;
+        md += `- **Aislamiento**: ≥ **${tx.V_iso} V** entre devanados y devanado–núcleo (V_sec pico = ${fx(tx.V_sec, 0)} V con margen 2×)\n`;
         md += `- **Flujo**: índice V_sec/f = ${tx.flux_index.toExponential(2)} V·s — ${tx.sat_risk ? '⚠ riesgo de saturación: usa núcleo mayor o sube f' : 'sin riesgo aparente ✓'}\n`;
         md += `- **Fase**: respeta los puntos (P1/S1 = inicio de devanado) para conservar la polaridad\n\n`;
       } else {
@@ -180,7 +188,7 @@ flowchart LR
         md += `| 4 | Capacitor de resonancia | ${fx(C_res_uF, 3)} µF film/MKP **no polarizado** · ≥ ${fx(V_C_pk * 1.5, 0)} V DC · ≥ ${fx(I_op_rms, 2)} A rms${modo_capacitor === 'manual' && filtrar_comerciales ? ' (valor comercial E12)' : ''} | 1 |\n`;
       }
       if (usar_transformador) {
-        md += `| 5 | Transformador T1 | relación ${tx.turns_ratio} (a = ${fx(tx.a, 2)}) · ≥ ${fx(Math.max(tx.P_total, 5), 0)} W · R_pri ${fx(params.R_pri, 1)} Ω / R_sec ${fx(params.R_sec, 2)} Ω | 1 |\n`;
+        md += `| 5 | Transformador T1 | relación ${tx.turns_ratio} (a = ${fx(tx.a, 2)}) · ≥ ${tx.P_nom} W · pri ${tx.awg_pri.ok ? `AWG ${tx.awg_pri.awg}` : `≥ ${fx(tx.awg_pri.mm2, 1)} mm²`} / sec ${tx.awg_sec.ok ? `AWG ${tx.awg_sec.awg}` : `≥ ${fx(tx.awg_sec.mm2, 1)} mm²`} · aislamiento ≥ ${tx.V_iso} V | 1 |\n`;
       }
       md += `| 6 | Amplificador de audio | Z nominal ${Zamp} Ω · ≥ ${fx(Math.max((usar_transformador ? tx.P_total : P) * 1.5, 5), 0)} W programa · banda de trabajo ${f} Hz | 1 (existente) |\n`;
       md += `| 7 | Soporte / separador de montaje | fija el entrehierro bobina–gong en ${gap} mm, sin contacto (rígido, no magnético) | 1 |\n`;
@@ -258,6 +266,20 @@ flowchart LR
         md += `- *Verificación recomendada: mide con LCR la R de la bobina a ${f} Hz sin gong y con gong a distancia de trabajo; ΔR·I_rms² = potencia real transferida al bronce.*\n`;
       }
       md += `\n`;
+
+      md += `### Resumen de seguridad y estabilidad\n\n`;
+      if (safety_issues.length === 0) {
+        md += `✓ **Sistema dentro de todos los límites de seguridad**: núcleo sin saturar, alambre y ΔT dentro de rango, tensiones manejables${usar_transformador ? ', T1 construible' : ''}.\n\n`;
+      } else {
+        md += safety_ok
+          ? `El sistema es viable, con observaciones a vigilar:\n\n`
+          : `> ⚠ **EL SISTEMA NO ES SEGURO/ESTABLE TAL COMO ESTÁ — no fabricar sin corregir lo marcado en rojo.**\n\n`;
+        for (const issue of safety_issues) {
+          md += `- ${issue.level === 'bad' ? '🔴 **CRÍTICO**' : '🟡 Precaución'}: ${issue.msg}\n`;
+        }
+        md += `\n`;
+      }
+      md += `*Límites aplicados: T1 con a ≤ 12 y V_sec ≤ 250 V pico · η ≥ 50% con T1 · V_C ≤ 630 V pico · ΔT ≤ 60 °C · B ≤ B_sat · I ≤ máx del calibre. Son los mismos que usa el optimizador para descartar soluciones.*\n\n`;
 
       if (usar_transformador) {
         md += `### Transformador de adaptación T1\n\n`;

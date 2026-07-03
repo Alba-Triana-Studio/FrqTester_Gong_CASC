@@ -89,6 +89,29 @@ export const AWG_TABLE = (() => {
   return t;
 })();
 
+// Calibre recomendado para una corriente dada: el MÁS FINO cuya corriente
+// segura (J_SAFE) soporta I_rms. Si ni el AWG 18 alcanza, se indica la
+// sección necesaria (usar hilos en paralelo o pletina).
+export function awgForCurrent(I_rms) {
+  for (let n = 32; n >= 18; n--) {
+    const i_safe = awgSafeCurrentRms(n);
+    if (i_safe >= I_rms) return { awg: n, ok: true, i_safe, mm2: awgCopperArea(n) * 1e6 };
+  }
+  return { awg: 18, ok: false, i_safe: awgSafeCurrentRms(18), mm2: I_rms / J_SAFE };
+}
+
+// ----- Límites de SEGURIDAD y FABRICABILIDAD del sistema -----
+// Una solución solo se considera viable (optimizador) o sana (consejos) si
+// respeta estos límites: transformadores construibles, tensiones manejables
+// y temperaturas estables.
+export const SAFETY_LIMITS = {
+  A_MAX: 12,        // relación de vueltas máxima práctica para un T1 de audio
+  V_SEC_MAX: 250,   // V pico máx en el secundario de T1 (aislamiento/seguridad)
+  V_C_MAX: 630,     // V pico máx en el capacitor (rating film/MKP estándar)
+  ETA_MIN: 50,      // % mínimo de la potencia que debe llegar a la bobina con T1
+  DT_MAX: 60,       // °C de calentamiento máximo aceptable de la bobina
+};
+
 const safeDiv = (a, b) => (b && isFinite(b) ? a / b : 0);
 const clamp = (x, lo, hi) => Math.min(Math.max(x, lo), hi);
 
@@ -317,18 +340,31 @@ export function calculateCoil(p) {
   // --- 3.7 Transformador de adaptación T1 ---
   // Relación: auto = √(|Z_bobina(f_op)|/Zamp). Si hay resonancia, Z_bobina≈R_ac
   // en f_op, así que a sale mucho menor (importante recalcular según los toggles).
-  const a_auto = Zamp > 0 ? Math.sqrt(safeDiv(Zcoil_op, Zamp)) : 0;
+  // La relación auto se RECORTA a A_MAX: adaptar una carga muy reactiva pediría
+  // relaciones absurdas (a>50, kV en el secundario) imposibles de construir.
+  const a_auto_raw = Zamp > 0 ? Math.sqrt(safeDiv(Zcoil_op, Zamp)) : 0;
+  const a_auto = Math.min(a_auto_raw, SAFETY_LIMITS.A_MAX);
   const a_used = usar_transformador
     ? (modo_relacion === 'manual' ? Math.max(a_manual || 1e-6, 1e-6) : a_auto)
     : a_auto;
   const tx = transformerAt(p, { R: R_ac, N, X: X_op }, a_used);
   tx.a_auto = a_auto;
+  tx.a_auto_raw = a_auto_raw;
+  tx.a_capped = a_auto_raw > SAFETY_LIMITS.A_MAX;
   tx.mode = modo_relacion === 'manual' ? 'manual' : 'auto';
   // Relación de vueltas aproximada primario:secundario (a = N_sec/N_pri).
   tx.turns_ratio = a_used >= 1 ? `1 : ${a_used.toFixed(2)}` : `${(1 / a_used).toFixed(2)} : 1`;
   // Saturación de T1 (cualitativa): B ∝ V_sec/(f). Aviso si V_sec alto y f baja.
   tx.flux_index = safeDiv(tx.V_sec, fHz);          // proxy V·s (∝ B·N·A)
   tx.sat_risk = usar_transformador && fHz < 200 && tx.V_sec > Vmax * 1.3;
+  // Especificación de FABRICACIÓN de T1: calibres por corriente (J_SAFE),
+  // potencia nominal con margen y tensión de aislamiento entre devanados.
+  tx.I_amp_rms = tx.I_amp / Math.SQRT2;
+  tx.I_bobina_rms = tx.I_bobina / Math.SQRT2;
+  tx.awg_pri = awgForCurrent(tx.I_amp_rms);
+  tx.awg_sec = awgForCurrent(tx.I_bobina_rms);
+  tx.P_nom = Math.ceil(Math.max(tx.P_total, 5));
+  tx.V_iso = Math.max(Math.ceil(tx.V_sec * 2 / 50) * 50, 100);
 
   // --- Operación activa según la TOPOLOGÍA (toggles) ---
   const I_direct = usar_resonancia ? I_res : I_pico;     // drive directo a la bobina
@@ -381,6 +417,21 @@ export function calculateCoil(p) {
   const P_gong = lcr_active ? I_op_rms * I_op_rms * R_ref : 0;
   const eta_gong = lcr_active && R_lcr_g > 0 ? (R_ref / R_lcr_g) * 100 : 0;
 
+  // --- EVALUACIÓN DE SEGURIDAD Y ESTABILIDAD del sistema completo ---
+  const sl = SAFETY_LIMITS;
+  const safety_issues = [];
+  if (!sat_ok) safety_issues.push({ level: 'bad', msg: `Núcleo saturado: B = ${(B_core_pk * 1000).toFixed(0)} mT > B_sat = ${(g.B_sat * 1000).toFixed(0)} mT` });
+  if (!current_ok) safety_issues.push({ level: 'bad', msg: `Sobrecorriente en el alambre: ${I_op_rms.toFixed(2)} A rms > ${i_safe_rms.toFixed(2)} A (AWG ${awg})` });
+  if (usar_resonancia && V_C_pk > sl.V_C_MAX) safety_issues.push({ level: 'bad', msg: `V_C = ${V_C_pk.toFixed(0)} V pico > ${sl.V_C_MAX} V (límite de film/MKP estándar)` });
+  else if (usar_resonancia && V_C_pk > 300) safety_issues.push({ level: 'warn', msg: `V_C = ${V_C_pk.toFixed(0)} V pico: usa film ≥ ${(V_C_pk * 1.5).toFixed(0)} V y terminales aislados` });
+  if (usar_transformador) {
+    if (tx.a_capped || a_used > sl.A_MAX) safety_issues.push({ level: 'bad', msg: `T1 impracticable: la adaptación pediría a ≈ ${tx.a_auto_raw.toFixed(1)} (límite práctico ${sl.A_MAX})` });
+    if (tx.V_sec > sl.V_SEC_MAX) safety_issues.push({ level: 'bad', msg: `V_sec = ${tx.V_sec.toFixed(0)} V pico > ${sl.V_SEC_MAX} V: tensión peligrosa en el secundario` });
+    if (tx.eta < sl.ETA_MIN) safety_issues.push({ level: 'warn', msg: `Solo el ${tx.eta.toFixed(0)}% de la potencia llega a la bobina (mínimo sano ${sl.ETA_MIN}%)` });
+  }
+  if (isFinite(deltaT_est) && deltaT_est > sl.DT_MAX) safety_issues.push({ level: deltaT_est > 80 ? 'bad' : 'warn', msg: `ΔT ≈ ${deltaT_est.toFixed(0)} °C en aire quieto (máx. estable ${sl.DT_MAX} °C)` });
+  const safety_ok = !safety_issues.some((i) => i.level === 'bad');
+
   // --- Adaptación: la carga que ve el ampli (con o sin T1) frente a Zamp ---
   const Z_load = Z_op;
   const a_opt = a_auto;
@@ -409,6 +460,7 @@ export function calculateCoil(p) {
     delta_t_mm: ed.delta_t_mm, t_eff_mm: ed.t_eff_mm, S_shield: ed.S, K_eddy: ed.K,
     F0, F_avg, F_ac, F_pk, F_avg_gf, f_mech,
     lcr_active, R_ref, P_gong, eta_gong,
+    safety_issues, safety_ok,
     a_opt, Z_refl, Z_load, match, tx, advice,
     turns_per_layer, layers_max, num_layers, depth_used_mm, N_max,
     fill_percent, fits, overflow,
@@ -431,6 +483,15 @@ function buildAdvice(p, c) {
       status: 'bad', title: 'Núcleo SATURADO — el modelo deja de valer',
       detail: `B_núcleo = ${(B_core_pk * 1000).toFixed(0)} mT supera B_sat = ${(B_sat * 1000).toFixed(0)} mT (${sat_pct.toFixed(0)}%). Saturado: μ_eff colapsa, L cae, la resonancia se desafina y aparecen los armónicos duros que ya viste en el laboratorio. Opciones: baja la corriente/FMM, usa material con B_sat mayor (acero laminado ≈ 1.5 T), o gana fuerza con más área Ac en vez de más B.`,
       numbers: [N('B núcleo', `${(B_core_pk * 1000).toFixed(0)} mT`), N('B_sat', `${(B_sat * 1000).toFixed(0)} mT`), N('uso', `${sat_pct.toFixed(0)}%`)],
+    };
+  }
+
+  if (T && (tx.a_capped || tx.a > SAFETY_LIMITS.A_MAX || tx.V_sec > SAFETY_LIMITS.V_SEC_MAX)) {
+    const aSugRes = Zamp > 0 ? Math.sqrt(Math.max(R, 1e-9) / Zamp) : 0;
+    return {
+      status: 'bad', title: 'T1 impracticable o peligroso — NO fabricar así',
+      detail: `Adaptar |Z_bobina| = ${Zcoil_op.toFixed(0)} Ω a ${f0} Hz pediría a ≈ ${tx.a_auto_raw.toFixed(1)}${tx.a_capped ? ` (recortada a ${SAFETY_LIMITS.A_MAX})` : ''} y V_sec ≈ ${tx.V_sec.toFixed(0)} V: un transformador así no es construible con seguridad (límites: a ≤ ${SAFETY_LIMITS.A_MAX}, V_sec ≤ ${SAFETY_LIMITS.V_SEC_MAX} V). La causa es adaptar una carga casi puramente REACTIVA: activa la resonancia serie (el ampli pasa a ver R_ac = ${R.toFixed(1)} Ω) y la relación sana baja a a ≈ ${aSugRes.toFixed(2)}.`,
+      numbers: [N('a pedida', tx.a_auto_raw.toFixed(1)), N('V_sec', `${tx.V_sec.toFixed(0)} V`), N('η', `${tx.eta.toFixed(0)} %`), N('a con resonancia', aSugRes.toFixed(2))],
     };
   }
 
@@ -597,13 +658,15 @@ export function recommendAWG(params) {
 //  10 mejores opciones viables distintas.
 // ============================================================================
 export const OPTIM_CRITERIA = {
-  objetivo: 'Máxima fuerza de repulsión (Lenz / Foucault) sobre el gong en la frecuencia de trabajo.',
+  objetivo: 'Máxima fuerza de repulsión (Lenz / Foucault) sobre el gong, con un sistema ESTABLE, SEGURO y FABRICABLE.',
   ley: 'F ≈ (B_gap²·Ac/4μ₀)·K(f), con B_gap ∝ μ_eff·FMM/lc·e^(−π·gap/w) y FMM = √(P·V_cu/ρ)/l_vuelta. El gong vibra a 2·f.',
   restricciones: [
     'Cabe en el carrete (llenado ≤ 100%).',
-    'El alambre no se sobrecalienta (corriente ≤ máx segura del calibre).',
+    'El alambre no se sobrecalienta (corriente ≤ máx segura y ΔT ≤ 60 °C).',
     'El amplificador no se sobrecarga (impedancia vista ≥ su valor nominal).',
     'El núcleo no se satura (B_núcleo ≤ B_sat).',
+    `T1 construible y seguro (a ≤ ${SAFETY_LIMITS.A_MAX}, V_sec ≤ ${SAFETY_LIMITS.V_SEC_MAX} V, η ≥ ${SAFETY_LIMITS.ETA_MIN}%).`,
+    `Capacitor dentro de rating práctico (V_C ≤ ${SAFETY_LIMITS.V_C_MAX} V pico).`,
   ],
 };
 
@@ -654,9 +717,15 @@ export function optimizeForce(params, locks = {}) {
     const hit = pool.get(key);
     if (hit) return hit;
     const r = calculateCoil(cfg);
+    const sl = SAFETY_LIMITS;
+    const txSafe = !cfg.usar_transformador ||
+      (!r.tx.a_capped && r.tx.a <= sl.A_MAX && r.tx.V_sec <= sl.V_SEC_MAX && r.tx.eta >= sl.ETA_MIN);
     const violations =
       (r.fits ? 0 : 1) + (r.current_ok ? 0 : 1) + (r.sat_ok ? 0 : 1) +
-      (r.Z_seen >= cfg.Zamp * 0.9 ? 0 : 1);
+      (r.Z_seen >= cfg.Zamp * 0.9 ? 0 : 1) +
+      (txSafe ? 0 : 1) +
+      (!cfg.usar_resonancia || r.V_C_pk <= sl.V_C_MAX ? 0 : 1) +
+      (isFinite(r.deltaT_est) && r.deltaT_est <= sl.DT_MAX ? 0 : 1);
     const feasible = violations === 0 && isFinite(r.F_ac) && r.F_ac > 0;
     const o = { cfg, r, feasible, violations, force: r.F_ac };
     pool.set(key, o);
@@ -726,8 +795,10 @@ function describeOption(o, rank, orig) {
   if (r.K_eddy > 0.3) good.push(`buen acoplamiento Foucault (K=${(r.K_eddy * 100).toFixed(0)}%)`);
   if (c.awg <= 22) good.push('alambre grueso y robusto');
 
+  if (r.safety_ok && r.deltaT_est <= 40 && (!res || r.V_C_pk <= 300)) good.push('sistema estable y seguro (dentro de todos los límites)');
   if (res) bad.push(`banda estrecha: solo cerca de ${Math.round(c.f)} Hz`);
   if (tx) bad.push(`pierde ${(100 - r.tx.eta).toFixed(0)}% en T1 y añade un transformador`);
+  if (isFinite(r.deltaT_est) && r.deltaT_est > 40) bad.push(`ΔT ≈ ${r.deltaT_est.toFixed(0)} °C: vigila la temperatura en sesiones largas`);
   if (r.fill_percent > 92) bad.push('carrete casi lleno: bobinado difícil');
   if (r.current_use_pct > 80) bad.push(`corriente al ${r.current_use_pct.toFixed(0)}% del límite del alambre`);
   if (r.sat_pct > 85) bad.push(`B al ${r.sat_pct.toFixed(0)}% de la saturación`);

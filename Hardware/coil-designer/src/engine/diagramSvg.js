@@ -402,24 +402,28 @@ export function buildTransformerDetailSvg(params, results, { theme = 'light' } =
   s.push(`<circle cx="${wX0 + 10}" cy="${pY1}" r="3" fill="${pal.text}"/>`);
   s.push(`<circle cx="${wX1 - 10}" cy="${sY1}" r="3" fill="${pal.text}"/>`);
 
-  // Panel de datos
+  // Panel de datos (incluye especificación de fabricación: calibres, potencia,
+  // aislamiento — todo lo que necesita el fabricante del transformador)
+  const awgTxt = (r) => (r.ok ? `AWG ${r.awg}` : `sección ≥ ${fx(r.mm2, 1)} mm² (hilos en paralelo)`);
   const dX = 560, rows = [
     ['Relación a = V_sec/V_pri', `${fx(tx.a, 2)}  (inversa ${fx(tx.a_inv, 2)})`],
     ['Relación de vueltas pri:sec', tx.turns_ratio],
+    ['Alambre primario', `${awgTxt(tx.awg_pri)} · ${fx(tx.I_amp_rms, 2)} A rms (J = 4 A/mm²)`],
+    ['Alambre secundario', `${awgTxt(tx.awg_sec)} · ${fx(tx.I_bobina_rms, 2)} A rms (J = 4 A/mm²)`],
     ['Acoplamiento k', fx(tx.k, 2)],
     ['Tensión', `${fx(params.Vmax, 2)} Vp → ${fx(tx.V_sec, 1)} Vp`],
     ['Corriente', `${fx(tx.I_amp, 2)} A pk → ${fx(tx.I_bobina, 2)} A pk`],
     ['Potencia media', `entra ${fx(tx.P_total / 2, 1)} W → bobina ${fx(P_avg, 1)} W`],
     ['Pérdidas / eficiencia', `${fx(tx.P_loss / 2, 1)} W · η = ${fx(tx.eta, 0)}%`],
     ['Índice de flujo V_sec/f', `${tx.flux_index.toExponential(2)} V·s ${tx.sat_risk ? '⚠ riesgo de saturación' : '✓'}`],
-    ['Potencia nominal sugerida', `≥ ${fx(Math.max(tx.P_total, 5), 0)} W continuos @ ${fx(params.f, 0)} Hz`],
+    ['Potencia nominal / aislamiento', `≥ ${tx.P_nom} W continuos @ ${fx(params.f, 0)} Hz · aislamiento ≥ ${tx.V_iso} V`],
   ];
-  s.push(T(dX, 92, 'DATOS DE T1', { size: 12.5, b: true }));
+  s.push(T(dX, 78, 'DATOS DE T1 (especificación de fabricación)', { size: 12.5, b: true }));
   rows.forEach(([kx, v], i) => {
-    const y = 118 + i * 30;
-    s.push(T(dX, y, kx, { size: 10.5, c: pal.sub }));
-    s.push(T(dX, y + 14, v, { size: 11.5, b: true }));
-    s.push(line(dX, y + 20, W - 30, y + 20, pal.blockS, 0.5));
+    const y = 100 + i * 29;
+    s.push(T(dX, y, kx, { size: 10, c: pal.sub }));
+    s.push(T(dX, y + 13, v, { size: 11, b: true }));
+    s.push(line(dX, y + 19, W - 30, y + 19, pal.blockS, 0.5));
   });
 
   s.push('</svg>');
